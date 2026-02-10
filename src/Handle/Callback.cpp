@@ -427,8 +427,9 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
             uint32_t eventFlags = events[i].events;
             if (eventFlags & (EPOLLHUP | EPOLLRDHUP | EPOLLERR))
             {
-                logOutputWarnConsole("tls Proxy: epoll events check fail: " + std::string(strerror(errno)));
-                continue;
+                logOutputErrorConsole("tls Proxy: EPOLLHUP | EPOLLRDHUP | EPOLLERR");
+                isBreak = true;
+                break;
             }
             if (eventFlags & EPOLLIN)
             {
