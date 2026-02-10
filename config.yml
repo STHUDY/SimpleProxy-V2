@@ -1,0 +1,41 @@
+config:
+  timeout: 5
+  pollingIntervalMs: 10
+  tls: 
+    enable: false
+    noBlock: false
+  socket:
+    enableSync: false
+  log:
+    enable: true 
+    console: true
+    level: debug
+    filePath: "./proxy.log"
+  threadPool:
+    minWokers: 10
+    maxWokers: 1000
+    clearThreadTimeMs: 60000
+    waitTimeMs: 1000
+    stepAddThreadNumber: 10
+server:
+  host: 0.0.0.0
+  port: 9800
+  socket:
+    bufferSize: 1024
+    maxBacklog: 128
+  tls:
+    cert: cert.pem
+    key: key.pem
+  connect:
+    banIps: []
+    allowedIps: [""]
+client:
+  host: 0.0.0.0
+  port: 10808
+  socket: 
+    bufferSize: 1024
+  tls:
+    hostname: 0.0.0.0
+    sni: 0.0.0.0
+    caCert: 
+
