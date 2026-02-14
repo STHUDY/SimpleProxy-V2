@@ -196,26 +196,13 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         client_info.ssl_ctx = serverTlsCtx; // 服务端上下文
         client_info.ssl = ssl;
 
-        // 复制地址信息
-        if (info->addr_len <= sizeof(client_info.addr))
-        {
-            memcpy(&client_info.addr, &info->addr, info->addr_len);
-            client_info.addr_len = info->addr_len;
-        }
-        else
-        {
-            logOutputErrorConsoleCharString("socket_server_callback: Address structure size mismatch");
-            break; // 地址信息有问题，放弃处理
-        }
+        memcpy(&client_info.addr, &info->addr, info->addr_len);
+        client_info.addr_len = info->addr_len;
 
         // 复制IP和端口
-        strncpy(client_info.ip_str, info->ip_str, sizeof(client_info.ip_str) - 1);
-        client_info.ip_str[sizeof(client_info.ip_str) - 1] = '\0'; // 确保结尾
+        strncpy(client_info.ip_str, info->ip_str, sizeof(INET_ADDRSTRLEN));
         client_info.port = info->port;
 
-        // 调用用户提供的TLS连接处理回调
-        // 注意：此处假设有一个全局的 tls_callback 变量
-        extern TlsClientCallback tls_callback; // Assume declared globally
         if (tls_callback)
         {
             tls_callback(fd, &client_info);
@@ -230,7 +217,7 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         }
         return; // 成功处理，直接返回 (注意：SSL对象所有权已转移)
 
-    } while (false); // do-while(false) 用于方便地使用break来统一清理错误情况
+    } while (0); // do-while(false) 用于方便地使用break来统一清理错误情况
 
     // 清理错误状态下的资源
     if (ssl)
@@ -637,8 +624,8 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
         client_info->ssl_ctx = clientTlsCtx; // 客户端上下文
         memcpy(&client_info->addr, &socketInfo.addr, socketInfo.addr_len);
         client_info->addr_len = socketInfo.addr_len;
-        strncpy(client_info->ip_str, socketInfo.ip_str, sizeof(client_info->ip_str) - 1);
-        client_info->ip_str[sizeof(client_info->ip_str) - 1] = '\0';
+        strncpy(client_info->ip_str, socketInfo.ip_str, INET_ADDRSTRLEN);
+        client_info->ip_str[INET_ADDRSTRLEN - 1] = '\0';
         client_info->port = socketInfo.port;
 
         return 0; // 成功

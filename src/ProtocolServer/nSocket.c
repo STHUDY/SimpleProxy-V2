@@ -98,6 +98,12 @@ void listenSocketServer(SocketClientCallback callback)
 
         if (client_fd < 0)
         {
+            // if (errno == EINTR)
+            //     continue;
+
+            if (errno == EMFILE || errno == ENFILE)
+                usleep(PollingIntervalMs * 1000);
+
             continue;
         }
 
@@ -113,6 +119,7 @@ void listenSocketServer(SocketClientCallback callback)
         memcpy(&client_info.addr, &client_addr, sizeof(client_addr));
         client_info.addr_len = client_len;
         strncpy(client_info.ip_str, client_ip, INET_ADDRSTRLEN);
+        client_info.ip_str[INET_ADDRSTRLEN - 1] = '\0';
         client_info.port = client_port;
 
         callback(client_fd, &client_info);
