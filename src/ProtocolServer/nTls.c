@@ -157,6 +157,29 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
     }
 
     SSL *ssl = NULL;
+    fd_set sslAcceptFds;
+    int flagsBackup = 0;
+
+    if (TlsNoBlockConnect)
+    {
+        flagsBackup = fcntl(fd, F_GETFL, 0);
+        if (flagsBackup == -1)
+        {
+            logOutputErrorConsoleCharString("Get tls socket block flags error");
+            return;
+        }
+
+        int flags = flagsBackup | O_NONBLOCK; // 设置 O_NONBLOCK 标志
+        if (fcntl(fd, F_SETFL, flags) == -1)
+        {
+            logOutputErrorConsoleCharString("Set tls socket no block flags error");
+            return;
+        }
+
+        FD_ZERO(&sslAcceptFds);
+        FD_SET(fd, &sslAcceptFds);
+    }
+
     do
     {
         ssl = SSL_new(serverTlsCtx);
@@ -176,8 +199,50 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         // SSL_CTX_set_verify(serverTlsCtx, SSL_VERIFY_NONE, NULL); // 默认即为不验证客户端
         // SSL_set_verify(ssl, SSL_VERIFY_NONE, NULL);
 
-        int sslAccept = SSL_accept(ssl);
-        if (sslAccept <= 0)
+        clock_t start, end;
+
+        int sslAccept = 0;
+        int sslConnErr = 0;
+
+        while (1)
+        {
+            if (SocketNoBlockConnect)
+                start = clock();
+
+            sslAccept = SSL_accept(ssl);
+
+            if (SocketNoBlockConnect)
+                end = clock();
+
+            if (sslAccept == 1)
+                // 握手成功
+                break;
+
+            sslConnErr = SSL_get_error(ssl, sslAccept);
+
+            if (sslConnErr == SSL_ERROR_WANT_READ ||
+                sslConnErr == SSL_ERROR_WANT_WRITE)
+            {
+                // 非阻塞情况下，SSL 还没准备好
+
+                if (SocketNoBlockConnect)
+                {
+                    int timeCount = ((end - start) * 1000000) / CLOCKS_PER_SEC;
+                    if (timeCount > PollingIntervalMs * 1000)
+                        timeCount = PollingIntervalMs * 1000;
+
+                    usleep(timeCount);
+                }
+
+                continue;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        if (sslConnErr != SSL_ERROR_NONE)
         {
             unsigned long err = ERR_get_error();
             char err_buf[256];
@@ -189,6 +254,16 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         }
 
         logOutputInfoConsoleCharString("TLS handshake completed successfully.");
+
+        if (TlsNoBlockConnect)
+        {
+            int flags = flagsBackup; // 恢复原始的标志
+            if (fcntl(fd, F_SETFL, flags) == -1)
+            {
+                logOutputErrorConsoleCharString("Restore socket flags error");
+                break;
+            }
+        }
 
         // 填充 TlsClientInfo 结构体
         TlsClientInfo client_info = {0}; // Initialize to zero

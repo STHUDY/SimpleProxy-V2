@@ -11,7 +11,7 @@ extern bool LogEnbaleConsole;
 extern int LogLevelNumber;
 extern char *LogFilePathChar;
 extern pthread_mutex_t LogMutex;
-extern FILE* LogFile;
+extern FILE *LogFile;
 
 extern int ThreadPoolMaxThreadNumber;
 extern int ThreadPoolMinThreadNumber;
@@ -32,7 +32,9 @@ extern int clientSocketBufferSize;
 
 extern bool TlsEnbale;
 extern bool TlsNoBlock;
+extern bool TlsNoBlockConnect;
 
+extern bool SocketNoBlockConnect;
 extern bool SocketEnableSync;
 
 extern char *tlsCertFileChar;

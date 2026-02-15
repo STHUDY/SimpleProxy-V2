@@ -1,11 +1,13 @@
 config:
   timeout: 5
-  pollingIntervalMs: 10
+  pollingIntervalMs: 1000
   tls: 
     enable: false
     noBlock: false
+    noBlockConnect: true
   socket:
     enableSync: false
+    noBlockConnect: true
   log:
     enable: true 
     console: true
@@ -28,7 +30,7 @@ server:
     key: key.pem
   connect:
     banIps: []
-    allowedIps: [""]
+    allowedIps: []
 client:
   host: 0.0.0.0
   port: 10808

@@ -127,8 +127,10 @@ int main(int argc, char *argv[])
 
         TlsEnbale = config["config"]["tls"]["enable"].as<bool>();
         TlsNoBlock = config["config"]["tls"]["noBlock"].as<bool>();
+        TlsNoBlockConnect = config["config"]["tls"]["noBlockConnect"].as<bool>();
 
         SocketEnableSync = config["config"]["socket"]["enableSync"].as<bool>();
+        SocketNoBlockConnect = config["config"]["socket"]["noBlockConnect"].as<bool>();
 
         tlsCertFile = config["server"]["tls"]["cert"].as<std::string>();
         tlsCertFileChar = (char *)tlsCertFile.c_str();

@@ -29,7 +29,9 @@ int clientSocketBufferSize = 0;
 
 bool TlsEnbale = false;
 bool TlsNoBlock = false;
+bool TlsNoBlockConnect = false;
 
+bool SocketNoBlockConnect = false;
 bool SocketEnableSync = false;
 
 char *tlsCertFileChar = NULL;

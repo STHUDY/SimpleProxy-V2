@@ -88,21 +88,80 @@ void listenSocketServer(SocketClientCallback callback)
     // 设置服务器运行标志
     SocketServerRun = true;
 
+    if (SocketNoBlockConnect)
+    {
+        int flags = fcntl(socketServerFd, F_GETFL, 0);
+        if (flags == -1)
+        {
+            logOutputErrorConsoleCharString("Get socket block flags error");
+            return;
+        }
+
+        flags |= O_NONBLOCK; // 设置 O_NONBLOCK 标志
+        if (fcntl(socketServerFd, F_SETFL, flags) == -1)
+        {
+            logOutputErrorConsoleCharString("Set socket no block flags error");
+            return;
+        }
+    }
+
+    clock_t start, end;
+
     // 主监听循环
     while (SocketServerRun)
     {
+
+        if (SocketNoBlockConnect)
+        {
+            start = clock();
+        }
+
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
+        // 等待新的客户端连接
         int client_fd = accept(socketServerFd, (struct sockaddr *)&client_addr, &client_len);
+
+        if (SocketNoBlockConnect)
+        {
+            end = clock();
+        }
 
         if (client_fd < 0)
         {
-            // if (errno == EINTR)
-            //     continue;
+            switch (errno)
+            {
+            case EWOULDBLOCK:
+                if (SocketNoBlockConnect)
+                {
+                    int timeCount = ((end - start) * 1000000) / CLOCKS_PER_SEC;
+                    if (timeCount > PollingIntervalMs)
+                        timeCount = PollingIntervalMs * 1000;
 
-            if (errno == EMFILE || errno == ENFILE)
-                usleep(PollingIntervalMs * 1000);
+                    usleep(timeCount);
+                }
+                break;
+
+            case EINTR:
+                continue;
+
+            case EMFILE:
+            case ENFILE:
+                // 进程/系统 fd 用完（严重错误）
+                logOutputErrorConsoleCharString("Too many open files");
+                usleep(PollingIntervalMs * 1000); // 休眠一下避免死循环
+                break;
+
+            case ECONNABORTED:
+                // 客户端在三次握手后立即断开
+                logOutputDebugConsoleCharString("Client aborted before accept");
+                break;
+
+            default:
+                // 其它未知错误
+                logOutputErrorConsoleCharString("accept() failed");
+                break;
+            }
 
             continue;
         }
@@ -125,7 +184,7 @@ void listenSocketServer(SocketClientCallback callback)
         callback(client_fd, &client_info);
     }
 
-    logOutputInfoConsoleCharString("Server listening stopped");
+    logOutputInfoConsoleCharString("socket listening stopped");
 }
 
 void closeSocketServer()
