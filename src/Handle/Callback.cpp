@@ -444,6 +444,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                 {
                     if (SSL_pending(srcSsl) == 0)
                     {
+                        timeout = 0;
                         i++;
                     }
                 }
@@ -479,6 +480,13 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                                     isBreak = true;
                                     break;
                                 }
+                                timeout += PollTimeSeconds;
+                                if (timeout > ConnectTimeout)
+                                {
+                                    logOutputWarnConsole("tls Proxy: Timeout while waiting for epoll events " + std::to_string(timeout));
+                                    isBreak = true;
+                                    break;
+                                }
                                 continue;
                             }
                             if (sendErrno == SSL_ERROR_ZERO_RETURN)
@@ -495,6 +503,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                     int recvErrno = SSL_get_error(srcSsl, sslReadNum);
                     if (recvErrno == SSL_ERROR_WANT_READ)
                     {
+                        timeout = 0;
                         i++;
                         continue;
                     }

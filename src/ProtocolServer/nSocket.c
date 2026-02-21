@@ -143,7 +143,7 @@ void listenSocketServer(SocketClientCallback callback)
                 break;
 
             case EINTR:
-                continue;
+                break;
 
             case EMFILE:
             case ENFILE:

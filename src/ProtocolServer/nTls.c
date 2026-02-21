@@ -275,7 +275,7 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         client_info.addr_len = info->addr_len;
 
         // 复制IP和端口
-        strncpy(client_info.ip_str, info->ip_str, sizeof(INET_ADDRSTRLEN));
+        strncpy(client_info.ip_str, info->ip_str, INET_ADDRSTRLEN);
         client_info.port = info->port;
 
         if (tls_callback)
@@ -716,6 +716,7 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
     { // If SSL_new failed but CTX was created temporarily
         SSL_CTX_free(temp_ctx);
     }
+    shutdown(socketInfo.fd, SHUT_RDWR);
     close(socketInfo.fd); // 关闭底层socket
 
     return -1; // 统一返回-1表示失败
