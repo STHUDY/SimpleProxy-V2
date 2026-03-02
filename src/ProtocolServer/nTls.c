@@ -206,12 +206,12 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
 
         while (1)
         {
-            if (SocketNoBlockConnect)
+            if (TlsNoBlockConnect)
                 start = clock();
 
             sslAccept = SSL_accept(ssl);
 
-            if (SocketNoBlockConnect)
+            if (TlsNoBlockConnect)
                 end = clock();
 
             if (sslAccept == 1)
@@ -228,7 +228,7 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
             {
                 // 非阻塞情况下，SSL 还没准备好
 
-                if (SocketNoBlockConnect)
+                if (TlsNoBlockConnect)
                 {
                     int timeCount = ((end - start) * 1000000) / CLOCKS_PER_SEC;
                     if (timeCount > PollingIntervalMs * 1000)
