@@ -215,8 +215,11 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
                 end = clock();
 
             if (sslAccept == 1)
+            {
                 // 握手成功
+                sslConnErr = 0;
                 break;
+            }
 
             sslConnErr = SSL_get_error(ssl, sslAccept);
 
