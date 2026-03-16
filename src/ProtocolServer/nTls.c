@@ -289,22 +289,31 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         {
             logOutputErrorConsoleCharString("socket_server_callback: tls_callback is null");
             // Consider closing the connection here if no handler is set
-            SSL_shutdown(ssl);
-            SSL_free(ssl);
-            close(fd);
+            if (ssl)
+            {
+                SSL_set_shutdown(ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
+                SSL_shutdown(ssl);
+                SSL_free(ssl);
+            }
+            if (fd >= 0)
+            {
+                close(fd);
+            }
         }
         return; // 成功处理，直接返回 (注意：SSL对象所有权已转移)
 
     } while (0); // do-while(false) 用于方便地使用break来统一清理错误情况
 
-    // 清理错误状态下的资源
     if (ssl)
     {
+        SSL_set_shutdown(ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
         SSL_shutdown(ssl);
         SSL_free(ssl);
     }
-    shutdown(fd, SHUT_RDWR);
-    close(fd);
+    if (fd >= 0)
+    {
+        close(fd);
+    }
 }
 
 // --- 初始化函数 ---
@@ -719,8 +728,11 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
     { // If SSL_new failed but CTX was created temporarily
         SSL_CTX_free(temp_ctx);
     }
-    shutdown(socketInfo.fd, SHUT_RDWR);
-    close(socketInfo.fd); // 关闭底层socket
+    if (socketInfo.fd >= 0)
+    {
+        shutdown(socketInfo.fd, SHUT_RDWR);
+        close(socketInfo.fd); // 关闭底层socket
+    }
 
     return -1; // 统一返回-1表示失败
 }

@@ -259,11 +259,16 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
     if (!isIpAllowed(tlsClientInfo->ip_str))
     {
         logOutputWarnConsole("Access denied: IP '" + std::string(tlsClientInfo->ip_str) + "' is in the BAN list.");
-        SSL_shutdown(tlsClientInfo->ssl);
-        SSL_free(tlsClientInfo->ssl);
-        shutdown(tlsClientInfo->fd, SHUT_RDWR);
-        close(tlsClientInfo->fd);
-        return;
+        if (tlsClientInfo->ssl)
+        {
+            SSL_set_shutdown(tlsClientInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
+            SSL_shutdown(tlsClientInfo->ssl);
+            SSL_free(tlsClientInfo->ssl);
+        }
+        if (tlsClientInfo->fd >= 0)
+        {
+            close(tlsClientInfo->fd);
+        }
     }
 
     // 必须复制TlsClientInfo
@@ -277,13 +282,24 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
         logOutputErrorConsole("Failed to connect to tls server");
         if (aConnectInfo->ssl)
         {
+            SSL_set_shutdown(aConnectInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(aConnectInfo->ssl);
             SSL_free(aConnectInfo->ssl);
         }
+        if (aConnectInfo->fd >= 0)
+        {
+            close(aConnectInfo->fd);
+        }
+
         if (bConnectInfo->ssl)
         {
+            SSL_set_shutdown(bConnectInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(bConnectInfo->ssl);
             SSL_free(bConnectInfo->ssl);
+        }
+        if (bConnectInfo->fd >= 0)
+        {
+            close(bConnectInfo->fd);
         }
         shutdown(aConnectInfo->fd, SHUT_RDWR);
         shutdown(bConnectInfo->fd, SHUT_RDWR);
@@ -427,7 +443,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
             uint32_t eventFlags = events[i].events;
             if (eventFlags & (EPOLLHUP | EPOLLRDHUP | EPOLLERR))
             {
-                logOutputErrorConsole("tls Proxy: EPOLLHUP | EPOLLRDHUP | EPOLLERR");
+                logOutputErrorConsole("tls Proxy: EPOLLHUP | EPOLLRDHUP | EPOLLERR on fd " + std::to_string(activeFd));
                 isBreak = true;
                 break;
             }
@@ -531,16 +547,28 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
     delete[] bufferAtoB;
     delete[] bufferBtoA;
 
-    SSL_shutdown(bSsl);
-    SSL_free(bSsl);
-    shutdown(bSocket, SHUT_RDWR);
-    close(bSocket);
+    if (bSsl)
+    {
+        SSL_set_shutdown(bSsl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
+        SSL_shutdown(bSsl);
+        SSL_free(bSsl);
+    }
+    if (bSocket >= 0)
+    {
+        close(bSocket); // 立即关闭底层连接
+    }
     delete bConnectInfo;
 
-    SSL_shutdown(aSsl);
-    SSL_free(aSsl);
-    shutdown(aSocket, SHUT_RDWR);
-    close(aSocket);
+    if (aSsl)
+    {
+        SSL_set_shutdown(aSsl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
+        SSL_shutdown(aSsl);
+        SSL_free(aSsl);
+    }
+    if (aSocket >= 0)
+    {
+        close(aSocket);
+    }
     delete aConnectInfo;
 
     logOutputInfoConsole("TLS proxy worker stopped");
