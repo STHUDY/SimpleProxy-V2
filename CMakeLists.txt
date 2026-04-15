@@ -30,5 +30,5 @@ endforeach()
 add_executable(${CMAKE_PROJECT_NAME} src/main.cpp ${SOURCES})
 
 target_link_libraries(SimpleProxy PRIVATE Threads::Threads)
-target_link_libraries(SimpleProxy PRIVATE yaml-cpp)
+target_link_libraries(SimpleProxy PRIVATE yaml-cpp::yaml-cpp)
 target_link_libraries(SimpleProxy PRIVATE OpenSSL::SSL OpenSSL::Crypto)
