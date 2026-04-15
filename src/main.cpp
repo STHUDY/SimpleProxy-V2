@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
             {
 
                 LogFilePath = logFilePathStr;                              // 存储原始 string
-                LogFilePathChar = const_cast<char *>(LogFilePath.c_str()); // 转换为 char*
+                LogFilePathChar = strdup(LogFilePath.c_str()); // 转换为 char*
             }
             else
             {
@@ -113,12 +113,12 @@ int main(int argc, char *argv[])
         logOutputInfoConsole("load config file success");
 
         serverHost = config["server"]["host"].as<std::string>();
-        serverHostChar = (char *)serverHost.c_str();
+        serverHostChar = strdup(serverHost.c_str());
 
         serverPort = config["server"]["port"].as<int>();
 
         clientHost = config["client"]["host"].as<std::string>();
-        clientHostChar = (char *)clientHost.c_str();
+        clientHostChar = strdup(clientHost.c_str());
 
         clientPort = config["client"]["port"].as<int>();
 
@@ -133,26 +133,26 @@ int main(int argc, char *argv[])
         SocketNoBlockConnect = config["config"]["socket"]["noBlockConnect"].as<bool>();
 
         tlsCertFile = config["server"]["tls"]["cert"].as<std::string>();
-        tlsCertFileChar = (char *)tlsCertFile.c_str();
+        tlsCertFileChar = strdup(tlsCertFile.c_str());
         tlsKeyFile = config["server"]["tls"]["key"].as<std::string>();
-        tlsKeyFileChar = (char *)tlsKeyFile.c_str();
+        tlsKeyFileChar = strdup(tlsKeyFile.c_str());
 
         clientSocketBufferSize = config["client"]["socket"]["bufferSize"].as<int>();
         tlsClientHostName = config["client"]["tls"]["hostname"].as<std::string>();
         if (tlsClientHostName != "")
         {
-            tlsClientHostNameChar = (char *)tlsClientHostName.c_str();
+            tlsClientHostNameChar = strdup(tlsClientHostName.c_str());
         }
         tlsClientSni = config["client"]["tls"]["sni"].as<std::string>();
         if (tlsClientSni != "")
         {
-            tlsClientSniChar = (char *)tlsClientSni.c_str();
+            tlsClientSniChar = strdup(tlsClientSni.c_str());
         }
 
         tlsServerCaFile = config["client"]["tls"]["caCert"].as<std::string>();
         if (tlsServerCaFile != "")
         {
-            tlsServerCaFileChar = (char *)tlsServerCaFile.c_str();
+            tlsServerCaFileChar = strdup(tlsServerCaFile.c_str());
         }
 
         YAML::Node banList = config["server"]["connect"]["banIps"];
@@ -268,6 +268,16 @@ int main(int argc, char *argv[])
         fclose(LogFile);
         LogFile = NULL;
     }
+
+    // Free allocated strings
+    if (serverHostChar) free(serverHostChar);
+    if (clientHostChar) free(clientHostChar);
+    if (LogFilePathChar) free(LogFilePathChar);
+    if (tlsCertFileChar) free(tlsCertFileChar);
+    if (tlsKeyFileChar) free(tlsKeyFileChar);
+    if (tlsClientHostNameChar) free(tlsClientHostNameChar);
+    if (tlsClientSniChar) free(tlsClientSniChar);
+    if (tlsServerCaFileChar) free(tlsServerCaFileChar);
 
     return EXIT_SUCCESS;
 }

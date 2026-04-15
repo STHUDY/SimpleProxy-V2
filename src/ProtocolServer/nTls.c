@@ -157,8 +157,8 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
     }
 
     SSL *ssl = NULL;
-    fd_set sslAcceptFds;
     int flagsBackup = 0;
+    struct timeval timeout;
 
     if (TlsNoBlockConnect)
     {
@@ -166,6 +166,8 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         if (flagsBackup == -1)
         {
             logOutputErrorConsoleCharString("Get tls socket block flags error");
+            shutdown(fd, SHUT_RDWR);
+            close(fd);
             return;
         }
 
@@ -173,11 +175,10 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         if (fcntl(fd, F_SETFL, flags) == -1)
         {
             logOutputErrorConsoleCharString("Set tls socket no block flags error");
+            shutdown(fd, SHUT_RDWR);
+            close(fd);
             return;
         }
-
-        FD_ZERO(&sslAcceptFds);
-        FD_SET(fd, &sslAcceptFds);
     }
 
     do
@@ -199,20 +200,13 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         // SSL_CTX_set_verify(serverTlsCtx, SSL_VERIFY_NONE, NULL); // 默认即为不验证客户端
         // SSL_set_verify(ssl, SSL_VERIFY_NONE, NULL);
 
-        clock_t start, end;
-
         int sslAccept = 0;
         int sslConnErr = 0;
+        time_t start_time = time(NULL);
 
         while (1)
         {
-            if (TlsNoBlockConnect)
-                start = clock();
-
             sslAccept = SSL_accept(ssl);
-
-            if (TlsNoBlockConnect)
-                end = clock();
 
             if (sslAccept == 1)
             {
@@ -227,17 +221,45 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
                 sslConnErr == SSL_ERROR_WANT_WRITE)
             {
                 // 非阻塞情况下，SSL 还没准备好
-
                 if (TlsNoBlockConnect)
                 {
-                    int timeCount = ((end - start) * 1000000) / CLOCKS_PER_SEC;
-                    if (timeCount > PollingIntervalMs * 1000)
-                        timeCount = PollingIntervalMs * 1000;
+                    fd_set fds;
+                    FD_ZERO(&fds);
+                    FD_SET(fd, &fds);
 
-                    usleep(timeCount);
+                    timeout.tv_sec = PollingIntervalMs / 1000;
+                    timeout.tv_usec = (PollingIntervalMs % 1000) * 1000;
+
+                    int ret = select(fd + 1, 
+                                     (sslConnErr == SSL_ERROR_WANT_READ) ? &fds : NULL,
+                                     (sslConnErr == SSL_ERROR_WANT_WRITE) ? &fds : NULL,
+                                     NULL, &timeout);
+                    if (ret == 0)
+                    {
+                        // 超时
+                        time_t current_time = time(NULL);
+                        if (current_time - start_time > ConnectTimeout)
+                        {
+                            logOutputErrorConsoleCharString("TLS handshake timeout");
+                            sslConnErr = SSL_ERROR_SYSCALL; // 模拟错误
+                            break;
+                        }
+                        continue;
+                    }
+                    else if (ret < 0)
+                    {
+                        logOutputErrorConsoleCharString("select error during TLS handshake");
+                        sslConnErr = SSL_ERROR_SYSCALL;
+                        break;
+                    }
                 }
-
-                continue;
+                else
+                {
+                    // 阻塞模式下，不应该到达这里
+                    logOutputErrorConsoleCharString("Unexpected WANT_READ/WANT_WRITE in blocking mode");
+                    sslConnErr = SSL_ERROR_SYSCALL;
+                    break;
+                }
             }
             else
             {
