@@ -29,16 +29,18 @@ static int verify_cert_hostname(X509 *cert, const char *expected_host)
                 if (asn1_str && asn1_str->data && asn1_str->length > 0)
                 {
                     const char *dns_name = (const char *)asn1_str->data;
-                    if (strlen(dns_name) == (size_t)asn1_str->length)
-                    { // Check for embedded nulls
-                        if (strcasecmp(expected_host, dns_name) == 0)
+                    size_t name_len = asn1_str->length;
+                    // Check for embedded nulls
+                    if (memchr(dns_name, '\0', name_len) == NULL)
+                    {
+                        if (strncasecmp(expected_host, dns_name, name_len) == 0 && strlen(expected_host) == name_len)
                         {
                             GENERAL_NAMES_free(names);
                             return 1;
                         }
-                        // Handle wildcard matching if needed: e.g., *.example.com matches sub.example.com
-                        if (dns_name[0] == '*' && strlen(expected_host) >= strlen(dns_name) &&
-                            strcasecmp(expected_host + strlen(expected_host) - strlen(dns_name) + 1, dns_name + 1) == 0)
+                        // Handle wildcard matching
+                        if (dns_name[0] == '*' && name_len > 1 && strlen(expected_host) >= name_len &&
+                            strncasecmp(expected_host + strlen(expected_host) - name_len + 1, dns_name + 1, name_len - 1) == 0)
                         {
                             GENERAL_NAMES_free(names);
                             return 1;
@@ -58,13 +60,23 @@ static int verify_cert_hostname(X509 *cert, const char *expected_host)
         int cn_length = X509_NAME_get_text_by_NID(subject_name, NID_commonName, cn_buffer, sizeof(cn_buffer));
         if (cn_length > 0)
         {
-            if (strcmp(expected_host, cn_buffer) == 0)
+            // Ensure null termination
+            if (cn_length < sizeof(cn_buffer))
+            {
+                cn_buffer[cn_length] = '\0';
+            }
+            else
+            {
+                cn_buffer[sizeof(cn_buffer) - 1] = '\0';
+            }
+            size_t cn_str_len = strlen(cn_buffer);
+            if (strcasecmp(expected_host, cn_buffer) == 0)
             {
                 return 1;
             }
-            // Handle wildcard CN if needed
-            if (cn_buffer[0] == '*' && strlen(expected_host) >= strlen(cn_buffer) &&
-                strcasecmp(expected_host + strlen(expected_host) - strlen(cn_buffer) + 1, cn_buffer + 1) == 0)
+            // Handle wildcard CN
+            if (cn_buffer[0] == '*' && cn_str_len > 1 && strlen(expected_host) >= cn_str_len &&
+                strncasecmp(expected_host + strlen(expected_host) - cn_str_len + 1, cn_buffer + 1, cn_str_len - 1) == 0)
             {
                 return 1;
             }
@@ -199,20 +211,12 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         // SSL_CTX_set_verify(serverTlsCtx, SSL_VERIFY_NONE, NULL); // 默认即为不验证客户端
         // SSL_set_verify(ssl, SSL_VERIFY_NONE, NULL);
 
-        clock_t start, end;
-
         int sslAccept = 0;
         int sslConnErr = 0;
 
         while (1)
         {
-            if (TlsNoBlockConnect)
-                start = clock();
-
             sslAccept = SSL_accept(ssl);
-
-            if (TlsNoBlockConnect)
-                end = clock();
 
             if (sslAccept == 1)
             {
@@ -226,15 +230,38 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
             if (sslConnErr == SSL_ERROR_WANT_READ ||
                 sslConnErr == SSL_ERROR_WANT_WRITE)
             {
-                // 非阻塞情况下，SSL 还没准备好
-
+                // 非阻塞情况下，SSL 还没准备好，使用 select 等待 socket 准备好
                 if (TlsNoBlockConnect)
                 {
-                    int timeCount = ((end - start) * 1000000) / CLOCKS_PER_SEC;
-                    if (timeCount > PollingIntervalMs * 1000)
-                        timeCount = PollingIntervalMs * 1000;
+                    fd_set readfds, writefds;
+                    FD_ZERO(&readfds);
+                    FD_ZERO(&writefds);
 
-                    usleep(timeCount);
+                    if (sslConnErr == SSL_ERROR_WANT_READ)
+                    {
+                        FD_SET(fd, &readfds);
+                    }
+                    else if (sslConnErr == SSL_ERROR_WANT_WRITE)
+                    {
+                        FD_SET(fd, &writefds);
+                    }
+
+                    struct timeval timeout;
+                    timeout.tv_sec = PollingIntervalMs / 1000;
+                    timeout.tv_usec = (PollingIntervalMs % 1000) * 1000;
+
+                    int selectRet = select(fd + 1, &readfds, &writefds, NULL, &timeout);
+                    if (selectRet < 0)
+                    {
+                        logOutputErrorConsoleCharString("select error during SSL handshake");
+                        break;
+                    }
+                    else if (selectRet == 0)
+                    {
+                        logOutputWarnConsoleCharString("SSL handshake timeout");
+                        break;
+                    }
+                    // 否则继续尝试 SSL_accept
                 }
 
                 continue;
@@ -668,10 +695,9 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
         long verify_result = SSL_get_verify_result(ssl);
         if (verify_result != X509_V_OK)
         {
-            char err_buf[256];
-            X509_verify_cert_error_string(verify_result);
+            const char *err_str = X509_verify_cert_error_string(verify_result);
             logOutputErrorConsoleCharString("connectTlsServer: Certificate verification failed:");
-            logOutputErrorConsoleCharString(err_buf);
+            logOutputErrorConsoleCharString(err_str);
             X509_free(server_cert);
             break;
         }
