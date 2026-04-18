@@ -2,7 +2,7 @@ config:
   timeout: 5
   pollingIntervalMs: 1000
   tls: 
-    enable: false
+    enable: false  # 如果要处理HTTPS/TLS流量，请设置为true，并确保cert和key文件存在
     noBlock: false
     noBlockConnect: true
   socket:
@@ -26,8 +26,8 @@ server:
     bufferSize: 1024
     maxBacklog: 128
   tls:
-    cert: cert.pem
-    key: key.pem
+    cert: cert.pem  # TLS证书文件路径（当tls.enable=true时必需）
+    key: key.pem    # TLS私钥文件路径（当tls.enable=true时必需）
   connect:
     banIps: []
     allowedIps: []
@@ -37,7 +37,6 @@ client:
   socket: 
     bufferSize: 1024
   tls:
-    hostname: 0.0.0.0
-    sni: 0.0.0.0
-    caCert: 
-
+    hostname: 0.0.0.0  # 目标服务器主机名（用于证书验证）
+    sni: 0.0.0.0       # SNI扩展（通常与hostname相同）
+    caCert:            # CA证书文件路径（可选，用于自定义CA验证）

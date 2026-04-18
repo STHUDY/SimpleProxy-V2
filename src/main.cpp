@@ -1,4 +1,5 @@
 #include "headfile.h"
+#include <sys/resource.h>  // 添加rlimit相关的头文件
 
 bool SigintFlag = false;
 
@@ -6,6 +7,27 @@ void SigintHandler(int sig)
 {
     SigintFlag = true;
     std::cout << " Ctrl+C pressed: wait close" << std::endl;
+}
+
+// 设置文件描述符限制
+void setFileDescriptorLimit()
+{
+    struct rlimit rl;
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+        logOutputInfoConsole("Current file descriptor limit: " + std::to_string(rl.rlim_cur) + "/" + std::to_string(rl.rlim_max));
+        
+        // 如果当前限制太低，尝试提高到合理值
+        if (rl.rlim_cur < 65536) {
+            rl.rlim_cur = std::min(static_cast<rlim_t>(65536), rl.rlim_max);
+            if (setrlimit(RLIMIT_NOFILE, &rl) == 0) {
+                logOutputInfoConsole("Increased file descriptor limit to: " + std::to_string(rl.rlim_cur));
+            } else {
+                logOutputWarnConsole("Failed to increase file descriptor limit: " + std::string(strerror(errno)));
+            }
+        }
+    } else {
+        logOutputErrorConsole("Failed to get file descriptor limit: " + std::string(strerror(errno)));
+    }
 }
 
 int main(int argc, char *argv[])
@@ -20,6 +42,9 @@ int main(int argc, char *argv[])
     {
         logOutputWarnConsole("[WARN] sigaction error but it is not improtant");
     }
+
+    // 设置文件描述符限制
+    setFileDescriptorLimit();
 
     try
     {

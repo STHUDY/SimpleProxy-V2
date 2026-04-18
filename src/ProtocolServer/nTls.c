@@ -754,6 +754,8 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
     { // If SSL_new failed but CTX was created temporarily
         SSL_CTX_free(temp_ctx);
     }
+    
+    // 只关闭一次socket，避免重复关闭
     if (socketInfo.fd >= 0)
     {
         shutdown(socketInfo.fd, SHUT_RDWR);
