@@ -83,10 +83,11 @@ static bool isIpAllowed(const std::string &ip_str)
 void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
 {
     // 必须CopySocketClientInfo
+    std::string clientAddr = std::string(socketClientInfo->ip_str) + ":" + std::to_string(socketClientInfo->port);
 
     if (!isIpAllowed(socketClientInfo->ip_str))
     {
-        logOutputWarnConsole("Access denied: IP '" + std::string(socketClientInfo->ip_str) + "' is in the BAN list.");
+        logOutputErrorConsole("SECURITY: Access denied - IP '" + std::string(socketClientInfo->ip_str) + "' is blocked by firewall rules");
         shutdown(socketClientInfo->fd, SHUT_RDWR);
         close(socketClientInfo->fd);
         return;
@@ -95,14 +96,14 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
     // 在非阻塞模式下设置socket为非阻塞以进行快速检测
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags == -1) {
-        logOutputErrorConsole("Failed to get socket flags for detection");
+        logOutputErrorConsole("Failed to get socket flags for client " + clientAddr + " - " + strerror(errno));
         shutdown(fd, SHUT_RDWR);
         close(fd);
         return;
     }
     
     if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-        logOutputErrorConsole("Failed to set socket to non-blocking for detection");
+        logOutputErrorConsole("Failed to set socket to non-blocking for client " + clientAddr + " - " + strerror(errno));
         shutdown(fd, SHUT_RDWR);
         close(fd);
         return;
@@ -113,14 +114,14 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
     
     // 恢复原始socket标志
     if (fcntl(fd, F_SETFL, flags) == -1) {
-        logOutputErrorConsole("Failed to restore socket flags");
+        logOutputWarnConsole("Failed to restore socket flags for client " + clientAddr + " - " + strerror(errno));
         // 继续处理，但记录警告
     }
 
     if (bytes_read > 0) {
         // 检测TLS ClientHello
         if (isTlsClientHello(detect_buffer, bytes_read)) {
-            logOutputWarnConsole("Detected TLS ClientHello from IP '" + std::string(socketClientInfo->ip_str) + 
+            logOutputWarnConsole("PROTOCOL VIOLATION: Detected TLS ClientHello from IP '" + std::string(socketClientInfo->ip_str) + 
                                "', but server is running in plain socket mode. Connection rejected.");
             shutdown(fd, SHUT_RDWR);
             close(fd);
@@ -129,7 +130,7 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
         
         // 检测HTTP请求 (可能发送到HTTPS端口)
         if (isHttpRequest(detect_buffer, bytes_read)) {
-            logOutputWarnConsole("Detected HTTP request from IP '" + std::string(socketClientInfo->ip_str) + 
+            logOutputWarnConsole("PROTOCOL VIOLATION: Detected HTTP request from IP '" + std::string(socketClientInfo->ip_str) + 
                                "', but server is running in plain socket mode. Connection rejected.");
             shutdown(fd, SHUT_RDWR);
             close(fd);
@@ -137,12 +138,12 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
         }
     } else if (bytes_read == 0) {
         // 客户端立即关闭连接
-        logOutputInfoConsole("Client closed connection immediately: " + std::string(socketClientInfo->ip_str));
+        logOutputDebugConsole("Client " + clientAddr + " closed connection immediately during handshake");
         close(fd);
         return;
     } else {
         if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            logOutputErrorConsole("Error reading from client socket: " + std::string(strerror(errno)));
+            logOutputErrorConsole("Error reading from client socket " + clientAddr + " - " + strerror(errno));
             close(fd);
             return;
         }
@@ -154,6 +155,7 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
 
     if (connectSocketServer(bConnectInfo) < 0)
     {
+        logOutputErrorConsole("Failed to establish backend connection for client " + clientAddr);
         if (aConnectInfo->fd > 0)
         {
             shutdown(aConnectInfo->fd, SHUT_RDWR);
@@ -165,7 +167,8 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
         return;
     }
 
-    logOutputInfoConsole("New connection from " + std::string(socketClientInfo->ip_str) + ":" + std::to_string(socketClientInfo->port));
+    logOutputInfoConsole("New connection established - Client: " + clientAddr + " -> Backend: " + 
+                        std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
 
     CallbackShareInfo *shareInfo = new CallbackShareInfo;
     shareInfo->init = false;
@@ -368,9 +371,11 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
 
 void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
 {
+    std::string clientAddr = std::string(tlsClientInfo->ip_str) + ":" + std::to_string(tlsClientInfo->port);
+
     if (!isIpAllowed(tlsClientInfo->ip_str))
     {
-        logOutputWarnConsole("Access denied: IP '" + std::string(tlsClientInfo->ip_str) + "' is in the BAN list.");
+        logOutputErrorConsole("SECURITY: TLS Access denied - IP '" + std::string(tlsClientInfo->ip_str) + "' is blocked by firewall rules");
         if (tlsClientInfo->ssl)
         {
             SSL_set_shutdown(tlsClientInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
@@ -381,6 +386,7 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
         {
             close(tlsClientInfo->fd);
         }
+        return;
     }
 
     // 必须复制TlsClientInfo
@@ -388,10 +394,11 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
     TlsClientInfo *bConnectInfo = new TlsClientInfo;
 
     const char *sni = SSL_get_servername(aConnectInfo->ssl, TLSEXT_NAMETYPE_host_name);
+    std::string sniStr = sni ? std::string(sni) : "none";
 
     if (connectTlsServer(bConnectInfo, sni) < 0)
     {
-        logOutputErrorConsole("Failed to connect to tls server");
+        logOutputErrorConsole("Failed to establish TLS backend connection for client " + clientAddr + " (SNI: " + sniStr + ")");
         if (aConnectInfo->ssl)
         {
             SSL_set_shutdown(aConnectInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
@@ -416,18 +423,12 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
             bConnectInfo->fd = -1; // 标记为已关闭
         }
         
-        // 删除重复的shutdown和close调用
-        // shutdown(aConnectInfo->fd, SHUT_RDWR);  // 已在上面处理
-        // shutdown(bConnectInfo->fd, SHUT_RDWR);  // 已在上面处理
-        // close(aConnectInfo->fd);  // 已在上面处理  
-        // close(bConnectInfo->fd);  // 已在上面处理
-        
         delete aConnectInfo;
         delete bConnectInfo;
         return;
     }
 
-    logOutputInfoConsole("New tls connection from " + std::string(tlsClientInfo->ip_str) + ":" + std::to_string(tlsClientInfo->port));
+    logOutputInfoConsole("New TLS connection established - Client: " + clientAddr + " (SNI: " + sniStr + ") -> Backend");
 
     threadPool.pushMission(tlsProxyWorker, aConnectInfo, bConnectInfo);
 }

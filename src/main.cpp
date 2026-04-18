@@ -198,13 +198,21 @@ int main(int argc, char *argv[])
             { // 检查是否为标量值
                 std::string value = item.as<std::string>();
                 allowIpList.push_back(value);
-                logOutputInfoConsole("allow ip: " + value);
+                logOutputInfoConsole("Firewall: Allow IP added - " + value);
             }
+        }
+        
+        // 记录防火墙配置摘要
+        if (!banIpList.empty() || !allowIpList.empty()) {
+            logOutputInfoConsole("Firewall configured - Banned IPs: " + std::to_string(banIpList.size()) + 
+                               ", Allowed IPs: " + std::to_string(allowIpList.size()));
+        } else {
+            logOutputWarnConsole("Firewall disabled - all IPs are allowed");
         }
     }
     catch (YAML::Exception &e)
     {
-        std::string error = "config.yml error: ";
+        std::string error = "Configuration error in config.yml: ";
         error.append(e.what());
         logOutputErrorConsole(error);
         return EXIT_FAILURE;
@@ -214,17 +222,17 @@ int main(int argc, char *argv[])
     {
         if (clientSocketBufferSize < 8192)
         {
-            // logOutputWarnConsole("clientSocketBufferSize is too small,you shoud set more to 16384");
-            logOutputWarnConsole("In blocking TLS mode (TlsNoBlock=false), clientSocketBufferSize (" + std::to_string(clientSocketBufferSize) + ") is smaller than the recommended minimum (8192). Consider increasing it for better performance.");
+            logOutputWarnConsole("Performance warning: In blocking TLS mode, clientSocketBufferSize (" + std::to_string(clientSocketBufferSize) + ") is smaller than recommended minimum (8192). Consider increasing it.");
         }
         if (serverSocketBufferSize < 8192)
         {
-            // logOutputWarnConsole("serverSocketBufferSize is too small,you shoud set more to 16384");
-            logOutputWarnConsole("In blocking TLS mode (TlsNoBlock=false), serverSocketBufferSize (" + std::to_string(serverSocketBufferSize) + ") is smaller than the recommended minimum (8192). Consider increasing it for better performance.");
+            logOutputWarnConsole("Performance warning: In blocking TLS mode, serverSocketBufferSize (" + std::to_string(serverSocketBufferSize) + ") is smaller than recommended minimum (8192). Consider increasing it.");
         }
     }
 
-    logOutputInfoConsole("threadpool init : truly minThreadNumber: " + std::to_string(ThreadPoolMinThreadNumber) + " maxThreadNumber: " + std::to_string(ThreadPoolMaxThreadNumber));
+    logOutputInfoConsole("ThreadPool configured - Min: " + std::to_string(ThreadPoolMinThreadNumber) + 
+                        ", Max: " + std::to_string(ThreadPoolMaxThreadNumber) + 
+                        ", Clear interval: " + std::to_string(ThreadPoolClearThreadTimeMs) + "ms");
 
     threadPool.setMinThreadNumber(ThreadPoolMinThreadNumber);
     threadPool.setMaxThreadNumber(ThreadPoolMaxThreadNumber);
@@ -234,16 +242,18 @@ int main(int argc, char *argv[])
 
     if (TlsEnbale)
     {
+        logOutputInfoConsole("Initializing TLS server mode...");
         initTlsServer();
     }
     else
     {
+        logOutputInfoConsole("Initializing plain socket server mode...");
         initSocketServer();
     }
 
     if (socketServerFd < 0)
     {
-        logOutputErrorConsole("initSocketServer error");
+        logOutputErrorConsole("Failed to initialize server socket");
         return EXIT_FAILURE;
     }
 
@@ -252,13 +262,13 @@ int main(int argc, char *argv[])
     if (TlsEnbale)
     {
         threadPool.submitMission(tlsListenerCallback);
+        logOutputInfoConsole("TLS server started successfully on " + serverHost + ":" + std::to_string(serverPort));
     }
     else
     {
         threadPool.submitMission(socketListenerCallback);
+        logOutputInfoConsole("Plain socket server started successfully on " + serverHost + ":" + std::to_string(serverPort));
     }
-
-    logOutputInfoConsole("server start at " + serverHost + ":" + std::to_string(serverPort));
 
     while (!SigintFlag)
     {

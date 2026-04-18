@@ -278,7 +278,8 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
             char err_buf[256];
             ERR_error_string_n(err, err_buf, sizeof(err_buf));
             char error_string[512];
-            snprintf(error_string, sizeof(error_string), "SSL accept error: %s", err_buf);
+            snprintf(error_string, sizeof(error_string), "SSL accept failed for client %s:%d - %s", 
+                     info->ip_str, info->port, err_buf);
             logOutputErrorConsoleCharString(error_string);
             break; // 跳出do-while，准备清理
         }
@@ -381,7 +382,13 @@ void initTlsServer()
     // 加载证书和私钥
     if (SSL_CTX_use_certificate_chain_file(serverTlsCtx, tlsCertFileChar) <= 0)
     {
-        logOutputErrorConsoleCharString("Failed to load server certificate chain file");
+        char error_msg[512];
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        snprintf(error_msg, sizeof(error_msg), "Failed to load server certificate chain file '%s': %s", 
+                 tlsCertFileChar, err_buf);
+        logOutputErrorConsoleCharString(error_msg);
         SSL_CTX_free(serverTlsCtx);
         serverTlsCtx = NULL;
         return;
@@ -389,7 +396,13 @@ void initTlsServer()
 
     if (SSL_CTX_use_PrivateKey_file(serverTlsCtx, tlsKeyFileChar, SSL_FILETYPE_PEM) <= 0)
     {
-        logOutputErrorConsoleCharString("Failed to load server private key file");
+        char error_msg[512];
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        snprintf(error_msg, sizeof(error_msg), "Failed to load server private key file '%s': %s", 
+                 tlsKeyFileChar, err_buf);
+        logOutputErrorConsoleCharString(error_msg);
         SSL_CTX_free(serverTlsCtx);
         serverTlsCtx = NULL;
         return;
@@ -678,7 +691,8 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
             char err_buf[256];
             ERR_error_string_n(err, err_buf, sizeof(err_buf));
             char output_buf[512];
-            snprintf(output_buf, sizeof(output_buf), "connectTlsServer: SSL_connect failed: %s", err_buf);
+            snprintf(output_buf, sizeof(output_buf), "connectTlsServer: SSL_connect to %s:%d failed: %s", 
+                     clientHostChar, clientPort, err_buf);
             logOutputErrorConsoleCharString(output_buf);
             break;
         }

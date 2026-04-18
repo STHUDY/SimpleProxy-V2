@@ -6,14 +6,18 @@ void initSocketServer()
     socketServerFd = socket(AF_INET, SOCK_STREAM, 0);
     if (socketServerFd < 0)
     {
-        logOutputErrorConsoleCharString("Init socket server have a mistake: socket error");
+        char error_msg[256];
+        snprintf(error_msg, sizeof(error_msg), "Init socket server failed: socket() error - %s", strerror(errno));
+        logOutputErrorConsoleCharString(error_msg);
         exit(EXIT_FAILURE);
     }
 
     int opt = 1;
     if (setsockopt(socketServerFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
     {
-        logOutputErrorConsoleCharString("Init socket server have a mistake: setsockopt error");
+        char error_msg[256];
+        snprintf(error_msg, sizeof(error_msg), "Init socket server failed: setsockopt(SO_REUSEADDR) error - %s", strerror(errno));
+        logOutputErrorConsoleCharString(error_msg);
         exit(EXIT_FAILURE);
     }
 
@@ -41,7 +45,9 @@ void initSocketServer()
         hostent = gethostbyname(serverHostChar);
         if (hostent == NULL)
         {
-            logOutputErrorConsoleCharString("Init socket server have a mistake: host can't bind");
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg), "Init socket server failed: cannot resolve host '%s'", serverHostChar);
+            logOutputErrorConsoleCharString(error_msg);
             exit(EXIT_FAILURE);
         }
         if (hostent->h_addrtype != AF_INET)
@@ -55,16 +61,23 @@ void initSocketServer()
 
     if (bind(socketServerFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0)
     {
-        logOutputErrorConsoleCharString("Init socket server have a mistake: bind error");
+        char error_msg[256];
+        snprintf(error_msg, sizeof(error_msg), "Init socket server failed: bind() error on %s:%d - %s", 
+                 serverHostChar, serverPort, strerror(errno));
+        logOutputErrorConsoleCharString(error_msg);
         exit(EXIT_FAILURE);
     }
 
     if (listen(socketServerFd, serverSocketMaxBacklog) < 0)
     {
-        logOutputErrorConsoleCharString("Init socket server have a mistake: listen error");
+        char error_msg[256];
+        snprintf(error_msg, sizeof(error_msg), "Init socket server failed: listen() error - %s", strerror(errno));
+        logOutputErrorConsoleCharString(error_msg);
     }
 
-    logOutputDebugConsoleCharString("Init socket server success");
+    char success_msg[256];
+    snprintf(success_msg, sizeof(success_msg), "Socket server initialized successfully on %s:%d", serverHostChar, serverPort);
+    logOutputInfoConsoleCharString(success_msg);
 }
 
 void listenSocketServer(SocketClientCallback callback)
@@ -148,18 +161,22 @@ void listenSocketServer(SocketClientCallback callback)
             case EMFILE:
             case ENFILE:
                 // 进程/系统 fd 用完（严重错误）
-                logOutputErrorConsoleCharString("Too many open files");
+                logOutputErrorConsoleCharString("Too many open files - system resource exhausted");
                 usleep(PollingIntervalMs * 1000); // 休眠一下避免死循环
                 break;
 
             case ECONNABORTED:
                 // 客户端在三次握手后立即断开
-                logOutputDebugConsoleCharString("Client aborted before accept");
+                logOutputDebugConsoleCharString("Client connection aborted before accept completed");
                 break;
 
             default:
                 // 其它未知错误
-                logOutputErrorConsoleCharString("accept() failed");
+                {
+                    char error_msg[256];
+                    snprintf(error_msg, sizeof(error_msg), "accept() failed with errno %d: %s", errno, strerror(errno));
+                    logOutputErrorConsoleCharString(error_msg);
+                }
                 break;
             }
 
