@@ -1,26 +1,28 @@
 #include "nTls.h" // 根据实际情况包含头文件
 
 static TlsClientCallback tls_callback;
+static int tls_initialized = 0;        // OpenSSL 库初始化标志
+static int client_ctx_init_failed = 0; // 避免重复尝试失败的客户端 CTX
 
-/**
- * @brief 验证证书中的主机名是否匹配预期主机名。
- * @param cert 证书指针。
- * @param expected_host 期望的主机名。
- * @return 1 如果匹配，0 如果不匹配。
- */
+// 前向声明
+static int verify_cert_hostname(X509 *cert, const char *expected_host);
+static int alpn_select_callback(SSL *ssl, const unsigned char **out, unsigned char *outlen,
+                                const unsigned char *in, unsigned int inlen, void *arg);
+static void socket_server_callback(int fd, SocketClientInfo *info);
+
+// ===================== 证书主机名验证（RFC 6125） =====================
 static int verify_cert_hostname(X509 *cert, const char *expected_host)
 {
-    if (!cert || !expected_host)
-    {
+    if (!cert || !expected_host || *expected_host == '\0')
         return 0;
-    }
 
-    // 检查 Subject Alternative Name (SAN)
+    // 1. 检查 Subject Alternative Name (SAN) 扩展
     GENERAL_NAMES *names = (GENERAL_NAMES *)X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
+    int matched = 0;
     if (names)
     {
-        int num_names = sk_GENERAL_NAME_num(names);
-        for (int i = 0; i < num_names; i++)
+        int num = sk_GENERAL_NAME_num(names);
+        for (int i = 0; i < num && !matched; i++)
         {
             const GENERAL_NAME *name = sk_GENERAL_NAME_value(names, i);
             if (name->type == GEN_DNS)
@@ -30,134 +32,100 @@ static int verify_cert_hostname(X509 *cert, const char *expected_host)
                 {
                     const char *dns_name = (const char *)asn1_str->data;
                     size_t name_len = asn1_str->length;
-                    // Check for embedded nulls
-                    if (memchr(dns_name, '\0', name_len) == NULL)
+                    // 检查嵌入的空字符（安全）
+                    if (memchr(dns_name, '\0', name_len) != NULL)
+                        continue;
+
+                    // 精确匹配
+                    if (strlen(expected_host) == name_len &&
+                        strncasecmp(expected_host, dns_name, name_len) == 0)
                     {
-                        if (strncasecmp(expected_host, dns_name, name_len) == 0 && strlen(expected_host) == name_len)
+                        matched = 1;
+                        break;
+                    }
+                    // 通配符匹配：* 必须出现在最左标签，且仅匹配一个标签
+                    if (name_len > 2 && dns_name[0] == '*' && dns_name[1] == '.')
+                    {
+                        const char *host_dot = strchr(expected_host, '.');
+                        if (host_dot && strcasecmp(host_dot + 1, dns_name + 2) == 0)
                         {
-                            GENERAL_NAMES_free(names);
-                            return 1;
-                        }
-                        // Handle wildcard matching
-                        if (dns_name[0] == '*' && name_len > 1 && strlen(expected_host) >= name_len &&
-                            strncasecmp(expected_host + strlen(expected_host) - name_len + 1, dns_name + 1, name_len - 1) == 0)
-                        {
-                            GENERAL_NAMES_free(names);
-                            return 1;
+                            matched = 1;
+                            break;
                         }
                     }
                 }
             }
         }
         GENERAL_NAMES_free(names);
+        if (matched)
+            return 1;
     }
 
-    // Fallback to Common Name (CN)
+    // 2. 回退到 Common Name (CN) —— 仅当 SAN 不存在时
     X509_NAME *subject_name = X509_get_subject_name(cert);
     if (subject_name)
     {
         char cn_buffer[256];
         int cn_length = X509_NAME_get_text_by_NID(subject_name, NID_commonName, cn_buffer, sizeof(cn_buffer));
-        if (cn_length > 0)
+        if (cn_length > 0 && cn_length < (int)sizeof(cn_buffer))
         {
-            // Ensure null termination
-            if (cn_length < sizeof(cn_buffer))
-            {
-                cn_buffer[cn_length] = '\0';
-            }
-            else
-            {
-                cn_buffer[sizeof(cn_buffer) - 1] = '\0';
-            }
+            cn_buffer[cn_length] = '\0';
             size_t cn_str_len = strlen(cn_buffer);
+            // 精确匹配
             if (strcasecmp(expected_host, cn_buffer) == 0)
-            {
                 return 1;
-            }
-            // Handle wildcard CN
-            if (cn_buffer[0] == '*' && cn_str_len > 1 && strlen(expected_host) >= cn_str_len &&
-                strncasecmp(expected_host + strlen(expected_host) - cn_str_len + 1, cn_buffer + 1, cn_str_len - 1) == 0)
+            // 通配符 CN（兼容旧证书）
+            if (cn_str_len > 2 && cn_buffer[0] == '*' && cn_buffer[1] == '.')
             {
-                return 1;
+                const char *host_dot = strchr(expected_host, '.');
+                if (host_dot && strcasecmp(host_dot + 1, cn_buffer + 2) == 0)
+                    return 1;
             }
         }
     }
-
-    return 0; // No match found
+    return 0;
 }
 
-// --- ALPN 回调函数 ---
-
-/**
- * @brief ALPN 回调函数，用于协商应用层协议。
- * @param ssl SSL 对象指针。
- * @param out 选中的协议。
- * @param outlen 选中的协议长度。
- * @param in 客户端提供的协议列表。
- * @param inlen 客户端提供的协议列表长度。
- * @param arg 用户自定义参数。
- * @return SSL_TLSEXT_ERR_OK 表示成功。
- */
+// ===================== ALPN 服务端回调 =====================
 static int alpn_select_callback(SSL *ssl, const unsigned char **out, unsigned char *outlen,
                                 const unsigned char *in, unsigned int inlen, void *arg)
 {
-    // 我们的首选协议列表 (优先级 h2 > http/1.1)
+    // 支持的协议（长度前缀格式），优先级 h2 > http/1.1
     static const unsigned char supported_protocols[] = {
-        0x02, 'h', '2',                              // Length-prefixed "h2"
-        0x08, 'h', 't', 't', 'p', '/', '1', '.', '1' // Length-prefixed "http/1.1"
-    };
-    const unsigned int supported_len = sizeof(supported_protocols);
-
-    const unsigned char *client_pos = in;
-    const unsigned char *client_end = in + inlen;
-
-    // 遍历客户端提供的协议列表
-    while (client_pos < client_end)
+        0x02, 'h', '2',
+        0x08, 'h', 't', 't', 'p', '/', '1', '.', '1'};
+    const unsigned char *p = in;
+    while (p < in + inlen)
     {
-        unsigned char client_len = *client_pos++;
-        if (client_pos + client_len > client_end)
+        unsigned char len = *p++;
+        if (p + len > in + inlen)
+            break; // 畸形包
+        // 在 supported_protocols 中查找
+        const unsigned char *q = supported_protocols;
+        while (q < supported_protocols + sizeof(supported_protocols))
         {
-            // Malformed input, skip or reject
-            logOutputWarnConsoleCharString("ALPN: Malformed client protocol list.");
-            break;
-        }
-
-        // 在我们的支持列表中查找匹配项
-        const unsigned char *our_pos = supported_protocols;
-        const unsigned char *our_end = supported_protocols + supported_len;
-        while (our_pos < our_end)
-        {
-            unsigned char our_len = *our_pos++;
-            if (our_pos + our_len > our_end)
-                break; // Should not happen
-
-            if (client_len == our_len && memcmp(client_pos, our_pos, our_len) == 0)
+            unsigned char qlen = *q++;
+            if (q + qlen > supported_protocols + sizeof(supported_protocols))
+                break;
+            if (len == qlen && memcmp(p, q, len) == 0)
             {
-                *out = our_pos; // Point to the protocol string inside our supported list
-                *outlen = our_len;
-                char negotiated_protocol[20];
-                snprintf(negotiated_protocol, sizeof(negotiated_protocol), "%.*s", our_len, (char *)*out);
+                *out = q; // 指向支持的协议字符串
+                *outlen = qlen;
+                char buf[20];
+                snprintf(buf, sizeof(buf), "%.*s", qlen, q);
                 logOutputInfoConsoleCharString("ALPN: Negotiated ");
-                logOutputInfoConsoleCharString(negotiated_protocol);
+                logOutputInfoConsoleCharString(buf);
                 return SSL_TLSEXT_ERR_OK;
             }
-            our_pos += our_len;
+            q += qlen;
         }
-        client_pos += client_len;
+        p += len;
     }
-
-    // 如果客户端不支持任何我们列出的协议，拒绝协商
-    logOutputWarnConsoleCharString("ALPN: Client does not support any of our protocols (h2, http/1.1), rejecting.");
+    logOutputWarnConsoleCharString("ALPN: Client does not support any of our protocols (h2, http/1.1)");
     return SSL_TLSEXT_ERR_NOACK;
 }
 
-// --- 内部回调函数 ---
-
-/**
- * @brief 内部回调函数，用于处理新建立的原始TCP连接并升级为TLS。
- * @param fd 新的TCP套接字描述符。
- * @param info 包含客户端地址等信息的结构体。
- */
+// ===================== 服务端回调：处理新 TCP 连接并升级为 TLS =====================
 static void socket_server_callback(int fd, SocketClientInfo *info)
 {
     if (!serverTlsCtx)
@@ -169,7 +137,6 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
     }
 
     SSL *ssl = NULL;
-    fd_set sslAcceptFds;
     int flagsBackup = 0;
 
     if (TlsNoBlockConnect)
@@ -180,16 +147,12 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
             logOutputErrorConsoleCharString("Get tls socket block flags error");
             return;
         }
-
-        int flags = flagsBackup | O_NONBLOCK; // 设置 O_NONBLOCK 标志
+        int flags = flagsBackup | O_NONBLOCK;
         if (fcntl(fd, F_SETFL, flags) == -1)
         {
             logOutputErrorConsoleCharString("Set tls socket no block flags error");
             return;
         }
-
-        FD_ZERO(&sslAcceptFds);
-        FD_SET(fd, &sslAcceptFds);
     }
 
     do
@@ -200,56 +163,38 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
             logOutputErrorConsoleCharString("socket_server_callback: SSL_new failed");
             break;
         }
-
         if (!SSL_set_fd(ssl, fd))
         {
             logOutputErrorConsoleCharString("socket_server_callback: SSL_set_fd failed");
             break;
         }
 
-        // --- 服务端：不再设置客户端证书验证 ---
-        // SSL_CTX_set_verify(serverTlsCtx, SSL_VERIFY_NONE, NULL); // 默认即为不验证客户端
-        // SSL_set_verify(ssl, SSL_VERIFY_NONE, NULL);
-
         int sslAccept = 0;
         int sslConnErr = 0;
-
         while (1)
         {
             sslAccept = SSL_accept(ssl);
-
             if (sslAccept == 1)
             {
-                // 握手成功
                 sslConnErr = 0;
                 break;
             }
-
             sslConnErr = SSL_get_error(ssl, sslAccept);
-
-            if (sslConnErr == SSL_ERROR_WANT_READ ||
-                sslConnErr == SSL_ERROR_WANT_WRITE)
+            if (sslConnErr == SSL_ERROR_WANT_READ || sslConnErr == SSL_ERROR_WANT_WRITE)
             {
-                // 非阻塞情况下，SSL 还没准备好，使用 select 等待 socket 准备好
                 if (TlsNoBlockConnect)
                 {
                     fd_set readfds, writefds;
                     FD_ZERO(&readfds);
                     FD_ZERO(&writefds);
-
                     if (sslConnErr == SSL_ERROR_WANT_READ)
-                    {
                         FD_SET(fd, &readfds);
-                    }
-                    else if (sslConnErr == SSL_ERROR_WANT_WRITE)
-                    {
+                    else
                         FD_SET(fd, &writefds);
-                    }
 
                     struct timeval timeout;
                     timeout.tv_sec = PollingIntervalMs / 1000;
                     timeout.tv_usec = (PollingIntervalMs % 1000) * 1000;
-
                     int selectRet = select(fd + 1, &readfds, &writefds, NULL, &timeout);
                     if (selectRet < 0)
                     {
@@ -261,13 +206,18 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
                         logOutputWarnConsoleCharString("SSL handshake timeout");
                         break;
                     }
-                    // 否则继续尝试 SSL_accept
+                    // 继续循环，重新调用 SSL_accept
+                    continue;
                 }
-
-                continue;
+                else
+                {
+                    // 阻塞模式下不应该出现，但继续重试
+                    continue;
+                }
             }
             else
             {
+                // 其他错误，退出循环
                 break;
             }
         }
@@ -278,35 +228,33 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
             char err_buf[256];
             ERR_error_string_n(err, err_buf, sizeof(err_buf));
             char error_string[512];
-            snprintf(error_string, sizeof(error_string), "SSL accept failed for client %s:%d - %s", 
+            snprintf(error_string, sizeof(error_string), "SSL accept failed for client %s:%d - %s",
                      info->ip_str, info->port, err_buf);
             logOutputErrorConsoleCharString(error_string);
-            break; // 跳出do-while，准备清理
+            break;
         }
 
         logOutputInfoConsoleCharString("TLS handshake completed successfully.");
 
         if (TlsNoBlockConnect)
         {
-            int flags = flagsBackup; // 恢复原始的标志
-            if (fcntl(fd, F_SETFL, flags) == -1)
+            // 恢复原始阻塞标志
+            if (fcntl(fd, F_SETFL, flagsBackup) == -1)
             {
                 logOutputErrorConsoleCharString("Restore socket flags error");
                 break;
             }
         }
 
-        // 填充 TlsClientInfo 结构体
-        TlsClientInfo client_info = {0}; // Initialize to zero
+        // 填充 TlsClientInfo
+        TlsClientInfo client_info = {0};
         client_info.fd = fd;
-        client_info.ssl_ctx = serverTlsCtx; // 服务端上下文
+        client_info.ssl_ctx = serverTlsCtx;
         client_info.ssl = ssl;
-
         memcpy(&client_info.addr, &info->addr, info->addr_len);
         client_info.addr_len = info->addr_len;
-
-        // 复制IP和端口
         strncpy(client_info.ip_str, info->ip_str, INET_ADDRSTRLEN);
+        client_info.ip_str[INET_ADDRSTRLEN - 1] = '\0';
         client_info.port = info->port;
 
         if (tls_callback)
@@ -316,7 +264,6 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         else
         {
             logOutputErrorConsoleCharString("socket_server_callback: tls_callback is null");
-            // Consider closing the connection here if no handler is set
             if (ssl)
             {
                 SSL_set_shutdown(ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
@@ -324,14 +271,13 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
                 SSL_free(ssl);
             }
             if (fd >= 0)
-            {
                 close(fd);
-            }
         }
-        return; // 成功处理，直接返回 (注意：SSL对象所有权已转移)
+        return; // 成功，SSL 对象所有权已转移给回调方
 
-    } while (0); // do-while(false) 用于方便地使用break来统一清理错误情况
+    } while (0);
 
+    // 错误清理
     if (ssl)
     {
         SSL_set_shutdown(ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
@@ -339,27 +285,20 @@ static void socket_server_callback(int fd, SocketClientInfo *info)
         SSL_free(ssl);
     }
     if (fd >= 0)
-    {
         close(fd);
-    }
 }
 
-// --- 初始化函数 ---
-
-/**
- * @brief 初始化TLS服务器上下文和底层TCP服务器。
- */
+// ===================== TLS 服务器初始化 =====================
 void initTlsServer()
 {
     logOutputInfoConsoleCharString("Initializing TLS Server...");
 
-    if (!tlsInit)
+    // 现代 OpenSSL 初始化（替换废弃 API）
+    if (!tls_initialized)
     {
-        logOutputInfoConsoleCharString("Initializing OpenSSL library...");
-        SSL_library_init();
-        SSL_load_error_strings();
-        OpenSSL_add_all_algorithms();
-        tlsInit = true;
+        OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT | OPENSSL_INIT_LOAD_CONFIG, NULL);
+        tls_initialized = 1;
+        tlsInit = true; // 保持原有全局标志
     }
 
     const SSL_METHOD *method = TLS_server_method();
@@ -370,10 +309,11 @@ void initTlsServer()
         return;
     }
 
-    // 设置最低协议版本
-    if (!SSL_CTX_set_min_proto_version(serverTlsCtx, TLS1_2_VERSION))
+    // 设置协议版本范围（TLS 1.2 最低，1.3 最高）
+    if (!SSL_CTX_set_min_proto_version(serverTlsCtx, TLS1_2_VERSION) ||
+        !SSL_CTX_set_max_proto_version(serverTlsCtx, TLS1_3_VERSION))
     {
-        logOutputErrorConsoleCharString("Failed to set minimum TLS version to 1.2");
+        logOutputErrorConsoleCharString("Failed to set TLS version range");
         SSL_CTX_free(serverTlsCtx);
         serverTlsCtx = NULL;
         return;
@@ -386,28 +326,26 @@ void initTlsServer()
         unsigned long err = ERR_get_error();
         char err_buf[256];
         ERR_error_string_n(err, err_buf, sizeof(err_buf));
-        snprintf(error_msg, sizeof(error_msg), "Failed to load server certificate chain file '%s': %s", 
+        snprintf(error_msg, sizeof(error_msg), "Failed to load server certificate chain file '%s': %s",
                  tlsCertFileChar, err_buf);
         logOutputErrorConsoleCharString(error_msg);
         SSL_CTX_free(serverTlsCtx);
         serverTlsCtx = NULL;
         return;
     }
-
     if (SSL_CTX_use_PrivateKey_file(serverTlsCtx, tlsKeyFileChar, SSL_FILETYPE_PEM) <= 0)
     {
         char error_msg[512];
         unsigned long err = ERR_get_error();
         char err_buf[256];
         ERR_error_string_n(err, err_buf, sizeof(err_buf));
-        snprintf(error_msg, sizeof(error_msg), "Failed to load server private key file '%s': %s", 
+        snprintf(error_msg, sizeof(error_msg), "Failed to load server private key file '%s': %s",
                  tlsKeyFileChar, err_buf);
         logOutputErrorConsoleCharString(error_msg);
         SSL_CTX_free(serverTlsCtx);
         serverTlsCtx = NULL;
         return;
     }
-
     if (!SSL_CTX_check_private_key(serverTlsCtx))
     {
         logOutputErrorConsoleCharString("Server private key does not match the certificate public key");
@@ -416,36 +354,46 @@ void initTlsServer()
         return;
     }
 
-    // --- 服务端：不再加载客户端证书验证的CA ---
-    // (代码块被完全移除)
-
-    // 设置ALPN回调
+    // 设置 ALPN 回调
     SSL_CTX_set_alpn_select_cb(serverTlsCtx, alpn_select_callback, NULL);
 
-    // 设置密码套件
+    // 设置 TLS 1.3 密码套件
     if (!SSL_CTX_set_ciphersuites(serverTlsCtx,
                                   "TLS_AES_256_GCM_SHA384:"
                                   "TLS_CHACHA20_POLY1305_SHA256:"
                                   "TLS_AES_128_GCM_SHA256"))
     {
-        logOutputErrorConsoleCharString("Failed to set server cipher suites");
+        logOutputErrorConsoleCharString("Failed to set server TLS 1.3 ciphersuites");
+        SSL_CTX_free(serverTlsCtx);
+        serverTlsCtx = NULL;
+        return;
+    }
+    // 同时设置 TLS 1.2 及以下密码套件
+    if (!SSL_CTX_set_cipher_list(serverTlsCtx,
+                                 "ECDHE-ECDSA-AES256-GCM-SHA384:"
+                                 "ECDHE-RSA-AES256-GCM-SHA384:"
+                                 "ECDHE-ECDSA-CHACHA20-POLY1305:"
+                                 "ECDHE-RSA-CHACHA20-POLY1305:"
+                                 "ECDHE-ECDSA-AES128-GCM-SHA256:"
+                                 "ECDHE-RSA-AES128-GCM-SHA256"))
+    {
+        logOutputErrorConsoleCharString("Failed to set server TLS 1.2 cipher list");
         SSL_CTX_free(serverTlsCtx);
         serverTlsCtx = NULL;
         return;
     }
 
-    // 设置选项
+    // 安全选项
     SSL_CTX_set_options(serverTlsCtx,
                         SSL_OP_NO_TICKET |
                             SSL_OP_NO_RENEGOTIATION |
                             SSL_OP_CIPHER_SERVER_PREFERENCE);
-
     SSL_CTX_set_session_cache_mode(serverTlsCtx, SSL_SESS_CACHE_OFF);
 
     logOutputInfoConsoleCharString("TLS Server context initialized successfully.");
 
-    // 初始化底层TCP服务器
-    initSocketServer(); // Assume this function exists
+    // 初始化底层 TCP 服务器
+    initSocketServer();
     if (socketServerFd < 0)
     {
         logOutputErrorConsoleCharString("Failed to initialize underlying TCP socket server");
@@ -453,16 +401,10 @@ void initTlsServer()
         serverTlsCtx = NULL;
         return;
     }
-
     logOutputInfoConsoleCharString("TLS Server initialization complete.");
 }
 
-// --- 监听函数 ---
-
-/**
- * @brief 开始监听TLS连接。
- * @param callback 当新TLS连接建立时调用的回调函数。
- */
+// ===================== 开始监听 =====================
 void listenTlsServer(TlsClientCallback callback)
 {
     if (!callback)
@@ -470,34 +412,22 @@ void listenTlsServer(TlsClientCallback callback)
         logOutputErrorConsoleCharString("listenTlsServer: callback is null");
         return;
     }
-    // Store the callback globally so socket_server_callback can access it
     tls_callback = callback;
     TlsServerRun = true;
     logOutputInfoConsoleCharString("Starting to listen for TLS connections...");
-    listenSocketServer(socket_server_callback); // Assume this function exists
+    listenSocketServer(socket_server_callback);
 }
 
-// --- 关闭函数 ---
-
-/**
- * @brief 关闭并清理TLS服务器。
- */
+// ===================== 关闭服务器 =====================
 void closeTlsServer()
 {
     logOutputInfoConsoleCharString("Shutting down TLS Server...");
     TlsServerRun = false;
-    closeSocketServer(); // Assume this function exists
+    closeSocketServer();
     logOutputInfoConsoleCharString("TLS Server shut down.");
 }
 
-// --- 客户端连接函数 ---
-
-/**
- * @brief 连接到远程TLS服务器。
- * @param client_info 输出参数，用于存储新建立的连接信息。
- * @param sni 从原始请求中提取的SNI，用于连接目标服务器。
- * @return 0 成功，负数表示错误码。
- */
+// ===================== TLS 客户端连接 =====================
 int connectTlsServer(TlsClientInfo *client_info, const char *sni)
 {
     if (!client_info)
@@ -505,285 +435,241 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
         logOutputErrorConsoleCharString("connectTlsServer: Invalid client_info pointer");
         return -1;
     }
-    // client_info 内容应在调用前被清零或初始化
+    memset(client_info, 0, sizeof(TlsClientInfo));
 
     SocketClientInfo socketInfo = {0};
-    if (connectSocketServer(&socketInfo) < 0)
-    { // Assume this function exists and fills socketInfo
-        logOutputErrorConsoleCharString("connectTlsServer: connectSocketServer failed");
-        return -1;
-    }
-
-    if (socketInfo.fd < 0)
+    if (connectSocketServer(&socketInfo) < 0 || socketInfo.fd < 0)
     {
-        logOutputErrorConsoleCharString("connectTlsServer: connectSocketServer returned invalid fd");
+        logOutputErrorConsoleCharString("connectTlsServer: connectSocketServer failed");
         return -1;
     }
 
     SSL_CTX *temp_ctx = NULL;
     SSL *ssl = NULL;
+    int ret = -1;
 
     do
     {
-        /* --- SSL_CTX 初始化（客户端复用）--- */
-        if (!clientTlsCtx)
+        // ---------- 创建或复用客户端 SSL_CTX ----------
+        if (!clientTlsCtx && !client_ctx_init_failed)
         {
             logOutputInfoConsoleCharString("Initializing client SSL_CTX...");
             const SSL_METHOD *method = TLS_client_method();
             temp_ctx = SSL_CTX_new(method);
             if (!temp_ctx)
             {
-                logOutputErrorConsoleCharString("connectTlsServer: SSL_CTX_new failed for client");
+                logOutputErrorConsoleCharString("connectTlsServer: SSL_CTX_new failed");
+                client_ctx_init_failed = 1;
                 break;
             }
 
-            if (!SSL_CTX_set_min_proto_version(temp_ctx, TLS1_2_VERSION))
+            // 设置协议版本范围
+            if (!SSL_CTX_set_min_proto_version(temp_ctx, TLS1_2_VERSION) ||
+                !SSL_CTX_set_max_proto_version(temp_ctx, TLS1_3_VERSION))
             {
-                logOutputErrorConsoleCharString("connectTlsServer: Failed to set client minimum TLS version");
+                logOutputErrorConsoleCharString("connectTlsServer: Failed to set TLS version range");
                 SSL_CTX_free(temp_ctx);
-                temp_ctx = NULL; // 修复：防止 double free
+                client_ctx_init_failed = 1;
                 break;
             }
 
-            // --- 客户端：加载验证服务端证书的CA ---
-            // 检查 tlsServerCaFileChar 是否为 NULL 或空字符串
+            // 加载 CA 证书（用于验证服务端）
             if (tlsServerCaFileChar && strlen(tlsServerCaFileChar) > 0)
             {
-                logOutputInfoConsoleCharString("Loading custom CA file for server verification: ");
+                logOutputInfoConsoleCharString("Loading custom CA file: ");
                 logOutputInfoConsoleCharString(tlsServerCaFileChar);
-
-                if (!SSL_CTX_load_verify_locations(temp_ctx, tlsServerCaFileChar, NULL))
+                if (SSL_CTX_load_verify_locations(temp_ctx, tlsServerCaFileChar, NULL) != 1)
                 {
-                    // 如果指定了文件但加载失败，则记录错误并退出
-                    logOutputErrorConsoleCharString("connectTlsServer: Failed to load CA file for server certificate verification");
-                    logOutputErrorConsoleCharString("CA File Path: ");
-                    logOutputErrorConsoleCharString(tlsServerCaFileChar);
+                    logOutputErrorConsoleCharString("Failed to load CA file");
                     SSL_CTX_free(temp_ctx);
-                    temp_ctx = NULL; // 修复：防止 double free
+                    client_ctx_init_failed = 1;
                     break;
                 }
-                logOutputInfoConsoleCharString("Custom CA file loaded successfully.");
+                logOutputInfoConsoleCharString("Custom CA file loaded.");
             }
             else
             {
-                // tlsServerCaFileChar 为 NULL 或空，使用系统默认路径
-                logOutputInfoConsoleCharString("Using system default CA paths for server certificate verification.");
-                if (!SSL_CTX_set_default_verify_paths(temp_ctx))
+                logOutputInfoConsoleCharString("Using system default CA paths.");
+                if (SSL_CTX_set_default_verify_paths(temp_ctx) != 1)
                 {
-                    // 理论上，设置系统默认路径很少失败，但为了健壮性可以检查
-                    logOutputErrorConsoleCharString("Warning: Could not load system default CA paths. Verification may fail.");
-                    // 我们可以选择继续还是失败。通常，即使此调用失败，系统路径也可能已自动加载。
-                    // 为了更严格的安全，可以选择 break 并失败。
-                    // 为了兼容性，我们选择继续，并依赖 SSL_CTX_set_verify 的行为。
-                    // 如果你希望在此失败，则取消下面三行的注释。
-                    /*
-                    SSL_CTX_free(temp_ctx);
-                    temp_ctx = NULL; // 修复：防止 double free
-                    break;
-                    */
+                    logOutputWarnConsoleCharString("Warning: Could not load system CA paths");
+                    // 不致命，继续
                 }
             }
 
-            // 启用对等方（服务器）证书验证
             SSL_CTX_set_verify(temp_ctx, SSL_VERIFY_PEER, NULL);
 
+            // 设置 TLS 1.3 密码套件
             if (!SSL_CTX_set_ciphersuites(temp_ctx,
                                           "TLS_AES_256_GCM_SHA384:"
                                           "TLS_CHACHA20_POLY1305_SHA256:"
                                           "TLS_AES_128_GCM_SHA256"))
             {
-                logOutputErrorConsoleCharString("connectTlsServer: Failed to set client cipher suites");
+                logOutputErrorConsoleCharString("Failed to set client TLS 1.3 ciphersuites");
                 SSL_CTX_free(temp_ctx);
-                temp_ctx = NULL; // 修复：防止 double free
+                client_ctx_init_failed = 1;
+                break;
+            }
+            // 设置 TLS 1.2 密码套件
+            if (!SSL_CTX_set_cipher_list(temp_ctx,
+                                         "ECDHE-ECDSA-AES256-GCM-SHA384:"
+                                         "ECDHE-RSA-AES256-GCM-SHA384:"
+                                         "ECDHE-ECDSA-CHACHA20-POLY1305:"
+                                         "ECDHE-RSA-CHACHA20-POLY1305:"
+                                         "ECDHE-ECDSA-AES128-GCM-SHA256:"
+                                         "ECDHE-RSA-AES128-GCM-SHA256"))
+            {
+                logOutputErrorConsoleCharString("Failed to set client TLS 1.2 cipher list");
+                SSL_CTX_free(temp_ctx);
+                client_ctx_init_failed = 1;
                 break;
             }
 
-            SSL_CTX_set_options(temp_ctx,
-                                SSL_OP_NO_TICKET |
-                                    SSL_OP_NO_RENEGOTIATION);
+            SSL_CTX_set_options(temp_ctx, SSL_OP_NO_TICKET | SSL_OP_NO_RENEGOTIATION);
 
-            // SSL_CTX_set_session_cache_mode(temp_ctx, SSL_SESS_CACHE_OFF);
-
-            clientTlsCtx = temp_ctx; // 成功后赋值给全局变量
-            temp_ctx = NULL;         // Prevent double free on error
-            logOutputInfoConsoleCharString("Client SSL_CTX initialized and stored globally.");
+            clientTlsCtx = temp_ctx;
+            temp_ctx = NULL;
+            logOutputInfoConsoleCharString("Client SSL_CTX created and stored.");
         }
-        else
+
+        if (!clientTlsCtx)
         {
-            logOutputDebugConsoleCharString("Reusing existing client SSL_CTX.");
+            logOutputErrorConsoleCharString("No available client SSL_CTX");
+            break;
         }
 
-        /* --- 创建 SSL 对象 --- */
+        // ---------- 创建 SSL 对象 ----------
         ssl = SSL_new(clientTlsCtx);
         if (!ssl)
         {
-            logOutputErrorConsoleCharString("connectTlsServer: SSL_new failed");
+            logOutputErrorConsoleCharString("SSL_new failed");
             break;
         }
 
-        // 设置ALPN协议 (h2 优先于 http/1.1)
-        const unsigned char alpn_protos[] = {
-            0x02, 'h', '2',                              // Length-prefixed "h2"
-            0x08, 'h', 't', 't', 'p', '/', '1', '.', '1' // Length-prefixed "http/1.1"
-        };
+        // 设置 ALPN 协议（h2 优先）
+        static const unsigned char alpn_protos[] = {
+            0x02, 'h', '2',
+            0x08, 'h', 't', 't', 'p', '/', '1', '.', '1'};
         if (SSL_set_alpn_protos(ssl, alpn_protos, sizeof(alpn_protos)) != 0)
         {
-            logOutputErrorConsoleCharString("connectTlsServer: SSL_set_alpn_protos failed");
+            logOutputErrorConsoleCharString("SSL_set_alpn_protos failed");
             break;
         }
 
-        /* --- 确定用于主机名验证的目标 --- */
+        // ---------- 确定主机名 ----------
         const char *verify_host = NULL;
         if (tlsClientHostNameChar && tlsClientHostNameChar[0] != '\0')
-        {
             verify_host = tlsClientHostNameChar;
-        }
         else if (sni && sni[0] != '\0')
-        {
             verify_host = sni;
-        }
         else
         {
-            // If no specific host is given, try to derive it from socket info (not ideal, often an IP)
-            // A better approach might be to pass the original hostname to this function.
-            // For now, let's assume SNI should be used for verification if available.
-            if (sni && sni[0] != '\0')
-            {
-                verify_host = sni;
-            }
-            else
-            {
-                logOutputErrorConsoleCharString("connectTlsServer: Error: No valid hostname for certificate verification!");
-                SSL_free(ssl);
-                close(socketInfo.fd);
-                return -8;
-            }
+            logOutputErrorConsoleCharString("No hostname for certificate verification");
+            break;
         }
 
-        /* --- 设置 SNI --- */
+        // 设置 SNI
         const char *used_sni = NULL;
         if (tlsClientSniChar && tlsClientSniChar[0] != '\0')
-        {
             used_sni = tlsClientSniChar;
-        }
         else if (sni && sni[0] != '\0')
-        {
             used_sni = sni;
-        }
-
-        if (used_sni)
+        if (used_sni && !SSL_set_tlsext_host_name(ssl, used_sni))
         {
-            if (!SSL_set_tlsext_host_name(ssl, used_sni))
-            {
-                logOutputErrorConsoleCharString("connectTlsServer: Failed to set SNI extension");
-                break;
-            }
+            logOutputErrorConsoleCharString("Failed to set SNI extension");
+            // 不中断，继续
         }
 
-        /* --- 绑定 socket --- */
         SSL_set_fd(ssl, socketInfo.fd);
 
-        /* --- 执行 TLS 握手 --- */
+        // ---------- TLS 握手 ----------
         int sslConnect = SSL_connect(ssl);
-        if (sslConnect <= 0)
+        if (sslConnect != 1)
         {
             unsigned long err = ERR_get_error();
             char err_buf[256];
             ERR_error_string_n(err, err_buf, sizeof(err_buf));
             char output_buf[512];
-            snprintf(output_buf, sizeof(output_buf), "connectTlsServer: SSL_connect to %s:%d failed: %s", 
+            snprintf(output_buf, sizeof(output_buf), "SSL_connect to %s:%d failed: %s",
                      clientHostChar, clientPort, err_buf);
             logOutputErrorConsoleCharString(output_buf);
             break;
         }
 
-        /* --- 客户端：验证服务端证书 --- */
+        // ---------- 验证服务端证书 ----------
         X509 *server_cert = SSL_get_peer_certificate(ssl);
         if (!server_cert)
         {
-            logOutputErrorConsoleCharString("connectTlsServer: Server did not present a certificate");
+            logOutputErrorConsoleCharString("Server did not present a certificate");
             break;
         }
-
-        // Verify result first (checks against CA list)
         long verify_result = SSL_get_verify_result(ssl);
         if (verify_result != X509_V_OK)
         {
-            const char *err_str = X509_verify_cert_error_string(verify_result);
-            logOutputErrorConsoleCharString("connectTlsServer: Certificate verification failed:");
-            logOutputErrorConsoleCharString(err_str);
+            logOutputErrorConsoleCharString("Certificate verification failed:");
+            logOutputErrorConsoleCharString(X509_verify_cert_error_string(verify_result));
             X509_free(server_cert);
             break;
         }
-
-        // Verify hostname
         if (!verify_cert_hostname(server_cert, verify_host))
         {
-            logOutputErrorConsoleCharString("connectTlsServer: Certificate hostname verification failed.");
-            logOutputErrorConsoleCharString("Expected Hostname: ");
+            logOutputErrorConsoleCharString("Hostname verification failed, expected: ");
             logOutputErrorConsoleCharString(verify_host);
             X509_free(server_cert);
             break;
         }
         X509_free(server_cert);
 
-        logOutputInfoConsoleCharString("connectTlsServer: TLS handshake with remote server completed successfully.");
+        logOutputInfoConsoleCharString("TLS handshake with remote server completed successfully.");
 
-        // Log negotiated ALPN protocol
+        // 记录协商的 ALPN 协议
         const unsigned char *negotiated_proto = NULL;
         unsigned int proto_len = 0;
         SSL_get0_alpn_selected(ssl, &negotiated_proto, &proto_len);
         if (negotiated_proto && proto_len > 0)
         {
-            char negotiated_protocol[20];
-            snprintf(negotiated_protocol, sizeof(negotiated_protocol), "%.*s", proto_len, (char *)negotiated_proto);
-            logOutputInfoConsoleCharString("ALPN: Negotiated ");
-            logOutputInfoConsoleCharString(negotiated_protocol);
+            char buf[20];
+            snprintf(buf, sizeof(buf), "%.*s", proto_len, negotiated_proto);
+            logOutputInfoConsoleCharString("ALPN negotiated: ");
+            logOutputInfoConsoleCharString(buf);
         }
         else
         {
             logOutputInfoConsoleCharString("ALPN: No protocol negotiated.");
         }
 
-        /* --- 填充 client_info --- */
+        // 填充输出结构
         client_info->fd = socketInfo.fd;
         client_info->ssl = ssl;
-        client_info->ssl_ctx = clientTlsCtx; // 客户端上下文
+        client_info->ssl_ctx = clientTlsCtx;
         memcpy(&client_info->addr, &socketInfo.addr, socketInfo.addr_len);
         client_info->addr_len = socketInfo.addr_len;
         strncpy(client_info->ip_str, socketInfo.ip_str, INET_ADDRSTRLEN);
         client_info->ip_str[INET_ADDRSTRLEN - 1] = '\0';
         client_info->port = socketInfo.port;
 
-        return 0; // 成功
+        ret = 0; // 成功
 
-    } while (false); // 统一错误处理
+    } while (0);
 
-    // 清理错误状态下的资源
-    if (ssl)
+    if (ret != 0)
     {
-        SSL_free(ssl);
+        // 错误清理
+        if (ssl)
+            SSL_free(ssl);
+        if (temp_ctx) // 如果临时 CTX 未被保存到全局，释放它
+            SSL_CTX_free(temp_ctx);
+        if (socketInfo.fd >= 0)
+        {
+            shutdown(socketInfo.fd, SHUT_RDWR);
+            close(socketInfo.fd);
+        }
+        return -1;
     }
-    else if (temp_ctx)
-    { // If SSL_new failed but CTX was created temporarily
-        SSL_CTX_free(temp_ctx);
-    }
-    
-    // 只关闭一次socket，避免重复关闭
-    if (socketInfo.fd >= 0)
-    {
-        shutdown(socketInfo.fd, SHUT_RDWR);
-        close(socketInfo.fd); // 关闭底层socket
-    }
-
-    return -1; // 统一返回-1表示失败
+    return 0;
 }
 
-// --- 清理资源函数 ---
-
-/**
- * @brief 关闭并清理所有TLS相关资源。
- */
+// ===================== 清理所有资源 =====================
 void closeTlsResource()
 {
     logOutputInfoConsoleCharString("Cleaning up all TLS resources...");
@@ -797,12 +683,9 @@ void closeTlsResource()
         SSL_CTX_free(clientTlsCtx);
         clientTlsCtx = NULL;
     }
-
-    // Modern OpenSSL (1.1.0+) manages most cleanup internally.
-    // The following functions are often unnecessary or deprecated.
-    // OPENSSL_cleanup() is the recommended way to clean up all OpenSSL resources.
     OPENSSL_cleanup();
-
     tlsInit = false;
+    tls_initialized = 0;
+    client_ctx_init_failed = 0;
     logOutputInfoConsoleCharString("All TLS resources cleaned up.");
 }
