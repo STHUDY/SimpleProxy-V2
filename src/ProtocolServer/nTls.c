@@ -21,9 +21,9 @@ static SSL_CTX *createContext(bool isServer)
     return ctx;
 }
 
-static void configureContext(SSL_CTX *ctx)
+static void configureServerContext(SSL_CTX *ctx)
 {
-    if (SSL_CTX_use_certificate_file(ctx, tlsCertFileChar, SSL_FILETYPE_PEM) <= 0)
+    if (SSL_CTX_use_certificate_chain_file(ctx, tlsCertFileChar) <= 0)
     {
         logOutputErrorConsoleCharString("Error: Unable to load certificate file");
         ERR_print_errors_fp(stderr);
@@ -66,7 +66,7 @@ void initTlsServer()
     logOutputInfoConsoleCharString("Init tls server");
 
     serverTlsCtx = createContext(true);
-    configureContext(serverTlsCtx);
+    configureServerContext(serverTlsCtx);
 
     clientTlsCtx = createContext(false);
     configureClientContext(clientTlsCtx);
