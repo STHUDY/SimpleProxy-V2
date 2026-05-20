@@ -1,11 +1,14 @@
 #include "nTls.h" // 根据实际情况包含头文件
 
-static SSL_CTX *createContext()
+static SSL_CTX *createContext(bool isServer)
 {
     const SSL_METHOD *method;
     SSL_CTX *ctx;
 
-    method = TLS_server_method();
+    if (isServer)
+        method = TLS_server_method();
+    else
+        method = TLS_client_method();
 
     ctx = SSL_CTX_new(method);
     if (!ctx)
@@ -41,34 +44,31 @@ static void configureClientContext(SSL_CTX *ctx)
      * Configure the client to abort the handshake if certificate verification
      * fails
      */
+
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
-    /*
-     * In a real application you would probably just use the default system certificate trust store and call:
-     *     SSL_CTX_set_default_verify_paths(ctx);
-     * In this demo though we are using a self-signed certificate, so the client must trust it directly.
-     */
+
     if (!SSL_CTX_set_default_verify_paths(ctx))
     {
-        logOutputErrorConsoleCharString("Error: Unable to load system certificate trust store");
-        ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
+        logOutputWarnConsoleCharString("Warning: Unable to load system certificate trust store, backend certificate verification will be disabled");
     }
+}
+
+static bool isValidTlsHost(const char *host)
+{
+    return host != NULL && host[0] != '\0' && strcmp(host, "0.0.0.0") != 0 && strcmp(host, "localhost") != 0;
 }
 
 void initTlsServer()
 {
-
-    SSL_library_init();
-    SSL_load_error_strings();
-    OpenSSL_add_ssl_algorithms();
+    OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT | OPENSSL_INIT_LOAD_CONFIG, NULL);
 
     signal(SIGPIPE, SIG_IGN);
     logOutputInfoConsoleCharString("Init tls server");
 
-    serverTlsCtx = createContext();
+    serverTlsCtx = createContext(true);
     configureContext(serverTlsCtx);
 
-    clientTlsCtx = createContext();
+    clientTlsCtx = createContext(false);
     configureClientContext(clientTlsCtx);
 
     logOutputDebugConsoleCharString("Init tls server context success");
@@ -366,12 +366,28 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
     SSL *ssl = SSL_new(clientTlsCtx);
     SSL_set_fd(ssl, socketInfo.fd);
 
-    SSL_set_tlsext_host_name(ssl, sni);
-    SSL_set1_host(ssl, sni);
+    if (isValidTlsHost(sni))
+    {
+        SSL_set_tlsext_host_name(ssl, sni);
+    }
+
+    if (isValidTlsHost(tlsClientHostNameChar))
+    {
+        SSL_set1_host(ssl, tlsClientHostNameChar);
+    }
+    else if (isValidTlsHost(sni))
+    {
+        SSL_set1_host(ssl, sni);
+    }
 
     if (SSL_connect(ssl) <= 0)
     {
-        logOutputErrorConsoleCharString("connectTlsServer: SSL_connect failed");
+        unsigned long err = ERR_get_error();
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        char error_string[512];
+        snprintf(error_string, sizeof(error_string), "connectTlsServer: SSL_connect failed - %s", err_buf);
+        logOutputErrorConsoleCharString(error_string);
         SSL_shutdown(ssl);
         SSL_free(ssl);
         close(socketInfo.fd);

@@ -327,8 +327,19 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
     TlsClientInfo *aConnectInfo = new TlsClientInfo(*tlsClientInfo);
     TlsClientInfo *bConnectInfo = new TlsClientInfo;
 
-    const char *sni = SSL_get_servername(aConnectInfo->ssl, TLSEXT_NAMETYPE_host_name);
-    std::string sniStr = sni ? std::string(sni) : serverHost;
+    std::string sniStr;
+    const char *sni = NULL;
+
+    if (tlsClientSni == "")
+    {
+        sni = SSL_get_servername(aConnectInfo->ssl, TLSEXT_NAMETYPE_host_name);
+        sniStr = sni;
+    }
+    else
+    {
+        sniStr = tlsClientSni;
+        sni = sniStr.c_str();
+    }
 
     if (connectTlsServer(bConnectInfo, sni) < 0)
     {
