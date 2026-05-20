@@ -249,6 +249,7 @@ int main(int argc, char *argv[])
     threadPool.setClearThreadTimeMs(ThreadPoolClearThreadTimeMs);
     threadPool.setWaitTimeMs(ThreadPoolWaitTimeMs);
     threadPool.setStepAddThreadNumber(ThreadPoolStepAddThreadNumber);
+    threadPool.openOutputError();
 
     if (TlsEnbale)
     {

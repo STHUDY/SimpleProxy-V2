@@ -248,8 +248,30 @@ void listenTlsServer(TlsClientCallback callback)
         int clientPort = ntohs(clientAddr.sin_port);
 
         SSL_CTX *ctx = createContext(true);
-        configureServerContext(ctx);
+
+        if (ctx == NULL)
+        {
+            logOutputErrorConsoleCharString("Listen tls server have a mistake: create context error");
+            close(clientFd);
+            continue;
+        }
+
+        if (configureServerContext(ctx) == false)
+        {
+            logOutputErrorConsoleCharString("Listen tls server have a mistake: configure server context error");
+            SSL_CTX_free(ctx);
+            close(clientFd);
+            continue;
+        }
+
         SSL *ssl = SSL_new(ctx);
+        if (ssl == NULL)
+        {
+            logOutputErrorConsoleCharString("Listen tls server have a mistake: SSL_new error");
+            SSL_CTX_free(ctx);
+            close(clientFd);
+            continue;
+        }
         SSL_set_fd(ssl, clientFd);
         int sslAccept = 0;
         int sslConnErr = 0;
@@ -360,9 +382,28 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
     }
 
     SSL_CTX *ctx = createContext(false);
-    configureClientContext(ctx);
+    if (!ctx)
+    {
+        logOutputErrorConsoleCharString("connectTlsServer: createContext failed");
+        close(socketInfo.fd);
+        return -1;
+    }
+    if (configureClientContext(ctx) == false)
+    {
+        logOutputErrorConsoleCharString("connectTlsServer: configureClientContext failed");
+        SSL_CTX_free(ctx);
+        close(socketInfo.fd);
+        return -1;
+    }
 
     SSL *ssl = SSL_new(ctx);
+    if (!ssl)
+    {
+        logOutputErrorConsoleCharString("connectTlsServer: SSL_new failed");
+        SSL_CTX_free(ctx);
+        close(socketInfo.fd);
+        return -1;
+    }
     SSL_set_fd(ssl, socketInfo.fd);
 
     if (isValidTlsHost(sni))
