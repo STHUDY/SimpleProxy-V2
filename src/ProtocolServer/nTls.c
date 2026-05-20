@@ -303,8 +303,6 @@ void listenTlsServer(TlsClientCallback callback)
 
             if (ssl)
             {
-                SSL_set_shutdown(ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
-                SSL_shutdown(ssl);
                 SSL_free(ssl);
                 SSL_CTX_free(ctx);
             }
@@ -389,7 +387,6 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
         char error_string[512];
         snprintf(error_string, sizeof(error_string), "connectTlsServer: SSL_connect failed - %s", err_buf);
         logOutputErrorConsoleCharString(error_string);
-        SSL_shutdown(ssl);
         SSL_free(ssl);
         SSL_CTX_free(ctx);
         close(socketInfo.fd);
