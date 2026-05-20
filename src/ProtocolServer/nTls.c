@@ -367,14 +367,14 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
     SSL_set_fd(ssl, socketInfo.fd);
 
     SSL_set_tlsext_host_name(ssl, sni);
-    SSL_set1_hostname(ssl, sni);
+    SSL_set1_host(ssl, sni);
 
     if (SSL_connect(ssl) <= 0)
     {
         logOutputErrorConsoleCharString("connectTlsServer: SSL_connect failed");
         SSL_shutdown(ssl);
         SSL_free(ssl);
-        closeSocketClient(&socketInfo);
+        close(socketInfo.fd);
         return -1;
     }
 
