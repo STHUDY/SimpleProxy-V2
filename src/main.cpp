@@ -254,17 +254,21 @@ int main(int argc, char *argv[])
     {
         logOutputInfoConsole("Initializing TLS server mode...");
         initTlsServer();
+        if (tlsSocketServerFd < 0)
+        {
+            logOutputErrorConsole("Failed to initialize TLS server socket");
+            return EXIT_FAILURE;
+        }
     }
     else
     {
         logOutputInfoConsole("Initializing plain socket server mode...");
         initSocketServer();
-    }
-
-    if (socketServerFd < 0)
-    {
-        logOutputErrorConsole("Failed to initialize server socket");
-        return EXIT_FAILURE;
+        if (socketServerFd < 0)
+        {
+            logOutputErrorConsole("Failed to initialize server socket");
+            return EXIT_FAILURE;
+        }
     }
 
     threadPool.init();

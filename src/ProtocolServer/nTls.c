@@ -257,7 +257,7 @@ void listenTlsServer(TlsClientCallback callback)
         int sslAccept = 0;
         int sslConnErr = 0;
 
-        while (true)
+        while (TlsServerRun)
         {
             if (TlsNoBlock)
             {
