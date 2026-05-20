@@ -34,7 +34,7 @@ void initSocketServer()
     }
     else if (strcmp(serverHostChar, "localhost") == 0)
     {
-        if (inet_pton(AF_INET, "127.0.0.1", &serverAddr.sin_addr) > 0)
+        if (inet_pton(AF_INET, "127.0.0.1", &serverAddr.sin_addr) <= 0)
         {
             logOutputErrorConsoleCharString("Init socket server have a mistake: localhost error");
             exit(EXIT_FAILURE);

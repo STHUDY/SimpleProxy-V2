@@ -317,6 +317,10 @@ void ThreadpoolSimple::sthutdown()
         this->is_can_submit_mission = false;
     }
     this->notifyManagerThread();
+    
+    // 修复：在关闭前清理剩余任务，防止内存泄漏
+    this->clearMissions();
+
     if (this->manager_thread != nullptr)
     {
         this->manager_thread->join();
