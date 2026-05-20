@@ -347,7 +347,6 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
         logOutputErrorConsole("Failed to establish TLS backend connection for client " + clientAddr + " (SNI: " + sniStr + ")");
         if (aConnectInfo->ssl)
         {
-            SSL_set_shutdown(aConnectInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(aConnectInfo->ssl);
             SSL_free(aConnectInfo->ssl);
             SSL_CTX_free(aConnectInfo->ssl_ctx);
@@ -359,7 +358,6 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
 
         if (bConnectInfo->ssl)
         {
-            SSL_set_shutdown(bConnectInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(bConnectInfo->ssl);
             SSL_free(bConnectInfo->ssl);
             SSL_CTX_free(bConnectInfo->ssl_ctx);
@@ -414,7 +412,6 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
 
         if (bSsl)
         {
-            SSL_set_shutdown(bSsl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(bSsl);
             SSL_free(bSsl);
             SSL_CTX_free(bSslCtx);
@@ -427,7 +424,6 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
 
         if (aSsl)
         {
-            SSL_set_shutdown(aSsl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(aSsl);
             SSL_free(aSsl);
             SSL_CTX_free(aSslCtx);
