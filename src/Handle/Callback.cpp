@@ -1,60 +1,5 @@
 #include "Callback.hpp"
 
-// 检测TLS ClientHello消息
-static bool isTlsClientHello(const char *data, size_t len) {
-    // TLS ClientHello的特征：
-    // - 第1字节为0x16 (Handshake protocol)
-    // - 第2-3字节为版本号 (0x0301 for TLS 1.0, 0x0302 for TLS 1.1, 0x0303 for TLS 1.2, 0x0304 for TLS 1.3)
-    // - 第4-5字节为记录长度
-    if (len < 5) {
-        return false;
-    }
-    
-    // 检查是否为Handshake协议
-    if ((unsigned char)data[0] != 0x16) {
-        return false;
-    }
-    
-    // 检查版本号 (必须是0x03xx)
-    if ((unsigned char)data[1] != 0x03) {
-        return false;
-    }
-    
-    // 检查记录长度
-    uint16_t record_len = ((unsigned char)data[3] << 8) | (unsigned char)data[4];
-    if (record_len == 0 || record_len > 16384) { // TLS记录最大长度通常为16KB
-        return false;
-    }
-    
-    // 如果数据长度足够，检查Handshake类型 (ClientHello应该是0x01)
-    if (len >= 6 && (unsigned char)data[5] == 0x01) {
-        return true;
-    }
-    
-    return false;
-}
-
-// 检测HTTP请求
-static bool isHttpRequest(const char *data, size_t len) {
-    if (len < 4) {
-        return false;
-    }
-    
-    // 检查是否以HTTP方法开头
-    std::string data_str(data, std::min(len, (size_t)10));
-    std::transform(data_str.begin(), data_str.end(), data_str.begin(), ::toupper);
-    
-    return (data_str.substr(0, 4) == "GET " || 
-            data_str.substr(0, 5) == "POST " || 
-            data_str.substr(0, 5) == "HEAD " || 
-            data_str.substr(0, 4) == "PUT " || 
-            data_str.substr(0, 7) == "DELETE " || 
-            data_str.substr(0, 6) == "PATCH " || 
-            data_str.substr(0, 5) == "TRACE " || 
-            data_str.substr(0, 8) == "CONNECT " ||
-            data_str.substr(0, 4) == "OPTIONS ");
-}
-
 static bool isIpAllowed(const std::string &ip_str)
 {
     auto ban_it = std::find(banIpList.begin(), banIpList.end(), ip_str);
@@ -95,14 +40,16 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
 
     // 在非阻塞模式下设置socket为非阻塞以进行快速检测
     int flags = fcntl(fd, F_GETFL, 0);
-    if (flags == -1) {
+    if (flags == -1)
+    {
         logOutputErrorConsole("Failed to get socket flags for client " + clientAddr + " - " + strerror(errno));
         shutdown(fd, SHUT_RDWR);
         close(fd);
         return;
     }
-    
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1)
+    {
         logOutputErrorConsole("Failed to set socket to non-blocking for client " + clientAddr + " - " + strerror(errno));
         shutdown(fd, SHUT_RDWR);
         close(fd);
@@ -111,38 +58,25 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
 
     char detect_buffer[1024];
     ssize_t bytes_read = recv(fd, detect_buffer, sizeof(detect_buffer), MSG_PEEK);
-    
+
     // 恢复原始socket标志
-    if (fcntl(fd, F_SETFL, flags) == -1) {
+    if (fcntl(fd, F_SETFL, flags) == -1)
+    {
         logOutputWarnConsole("Failed to restore socket flags for client " + clientAddr + " - " + strerror(errno));
         // 继续处理，但记录警告
     }
 
-    if (bytes_read > 0) {
-        // 检测TLS ClientHello
-        if (isTlsClientHello(detect_buffer, bytes_read)) {
-            logOutputWarnConsole("PROTOCOL VIOLATION: Detected TLS ClientHello from IP '" + std::string(socketClientInfo->ip_str) + 
-                               "', but server is running in plain socket mode. Connection rejected.");
-            shutdown(fd, SHUT_RDWR);
-            close(fd);
-            return;
-        }
-        
-        // 检测HTTP请求 (可能发送到HTTPS端口)
-        if (isHttpRequest(detect_buffer, bytes_read)) {
-            logOutputWarnConsole("PROTOCOL VIOLATION: Detected HTTP request from IP '" + std::string(socketClientInfo->ip_str) + 
-                               "', but server is running in plain socket mode. Connection rejected.");
-            shutdown(fd, SHUT_RDWR);
-            close(fd);
-            return;
-        }
-    } else if (bytes_read == 0) {
+    if (bytes_read == 0)
+    {
         // 客户端立即关闭连接
         logOutputDebugConsole("Client " + clientAddr + " closed connection immediately during handshake");
         close(fd);
         return;
-    } else {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+    }
+    else
+    {
+        if (errno != EAGAIN && errno != EWOULDBLOCK)
+        {
             logOutputErrorConsole("Error reading from client socket " + clientAddr + " - " + strerror(errno));
             close(fd);
             return;
@@ -167,8 +101,8 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
         return;
     }
 
-    logOutputInfoConsole("New connection established - Client: " + clientAddr + " -> Backend: " + 
-                        std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
+    logOutputInfoConsole("New connection established - Client: " + clientAddr + " -> Backend: " +
+                         std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
 
     CallbackShareInfo *shareInfo = new CallbackShareInfo;
     shareInfo->init = false;
@@ -394,7 +328,7 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
     TlsClientInfo *bConnectInfo = new TlsClientInfo;
 
     const char *sni = SSL_get_servername(aConnectInfo->ssl, TLSEXT_NAMETYPE_host_name);
-    std::string sniStr = sni ? std::string(sni) : "none";
+    std::string sniStr = sni ? std::string(sni) : serverHost;
 
     if (connectTlsServer(bConnectInfo, sni) < 0)
     {
@@ -422,7 +356,7 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
             close(bConnectInfo->fd);
             bConnectInfo->fd = -1; // 标记为已关闭
         }
-        
+
         delete aConnectInfo;
         delete bConnectInfo;
         return;
@@ -444,7 +378,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
     SSL *bSsl = bConnectInfo->ssl;
     int aSocket = aConnectInfo->fd;
     int bSocket = bConnectInfo->fd;
-    
+
     // 初始化为-1表示未创建
     int epollFd = -1;
 
@@ -452,15 +386,16 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
     char *bufferBtoA = new char[serverSocketBufferSize];
 
     // 用于标记是否需要执行清理逻辑的 lambda
-    auto cleanup = [&]() {
+    auto cleanup = [&]()
+    {
         if (epollFd != -1)
         {
             close(epollFd);
         }
-        
+
         delete[] bufferAtoB;
         delete[] bufferBtoA;
-        
+
         if (bSsl)
         {
             SSL_set_shutdown(bSsl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
@@ -484,7 +419,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
             close(aSocket);
         }
         delete aConnectInfo;
-        
+
         logOutputInfoConsole("TLS proxy worker stopped");
     };
 

@@ -15,8 +15,6 @@
 #include <signal.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
-#include <openssl/x509v3.h>
-#include <openssl/tls1.h>
 #include <netdb.h>
 #include <sys/epoll.h>
 //=================C++库==================
@@ -35,7 +33,7 @@
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <unordered_set>
-#include <filesystem> 
+#include <filesystem>
 #endif
 //==================用户C库================
 #include "nSocket.h"

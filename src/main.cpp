@@ -1,5 +1,5 @@
 #include "headfile.h"
-#include <sys/resource.h>  // 添加rlimit相关的头文件
+#include <sys/resource.h> // 添加rlimit相关的头文件
 
 bool SigintFlag = false;
 
@@ -13,19 +13,26 @@ void SigintHandler(int sig)
 void setFileDescriptorLimit()
 {
     struct rlimit rl;
-    if (getrlimit(RLIMIT_NOFILE, &rl) == 0) {
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0)
+    {
         logOutputInfoConsole("Current file descriptor limit: " + std::to_string(rl.rlim_cur) + "/" + std::to_string(rl.rlim_max));
-        
+
         // 如果当前限制太低，尝试提高到合理值
-        if (rl.rlim_cur < 65536) {
+        if (rl.rlim_cur < 65536)
+        {
             rl.rlim_cur = std::min(static_cast<rlim_t>(65536), rl.rlim_max);
-            if (setrlimit(RLIMIT_NOFILE, &rl) == 0) {
+            if (setrlimit(RLIMIT_NOFILE, &rl) == 0)
+            {
                 logOutputInfoConsole("Increased file descriptor limit to: " + std::to_string(rl.rlim_cur));
-            } else {
+            }
+            else
+            {
                 logOutputWarnConsole("Failed to increase file descriptor limit: " + std::string(strerror(errno)));
             }
         }
-    } else {
+    }
+    else
+    {
         logOutputErrorConsole("Failed to get file descriptor limit: " + std::string(strerror(errno)));
     }
 }
@@ -201,12 +208,15 @@ int main(int argc, char *argv[])
                 logOutputInfoConsole("Firewall: Allow IP added - " + value);
             }
         }
-        
+
         // 记录防火墙配置摘要
-        if (!banIpList.empty() || !allowIpList.empty()) {
-            logOutputInfoConsole("Firewall configured - Banned IPs: " + std::to_string(banIpList.size()) + 
-                               ", Allowed IPs: " + std::to_string(allowIpList.size()));
-        } else {
+        if (!banIpList.empty() || !allowIpList.empty())
+        {
+            logOutputInfoConsole("Firewall configured - Banned IPs: " + std::to_string(banIpList.size()) +
+                                 ", Allowed IPs: " + std::to_string(allowIpList.size()));
+        }
+        else
+        {
             logOutputWarnConsole("Firewall disabled - all IPs are allowed");
         }
     }
@@ -230,9 +240,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    logOutputInfoConsole("ThreadPool configured - Min: " + std::to_string(ThreadPoolMinThreadNumber) + 
-                        ", Max: " + std::to_string(ThreadPoolMaxThreadNumber) + 
-                        ", Clear interval: " + std::to_string(ThreadPoolClearThreadTimeMs) + "ms");
+    logOutputInfoConsole("ThreadPool configured - Min: " + std::to_string(ThreadPoolMinThreadNumber) +
+                         ", Max: " + std::to_string(ThreadPoolMaxThreadNumber) +
+                         ", Clear interval: " + std::to_string(ThreadPoolClearThreadTimeMs) + "ms");
 
     threadPool.setMinThreadNumber(ThreadPoolMinThreadNumber);
     threadPool.setMaxThreadNumber(ThreadPoolMaxThreadNumber);

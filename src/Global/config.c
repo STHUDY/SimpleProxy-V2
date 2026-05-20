@@ -49,6 +49,8 @@ int socketServerFd = -1;
 struct sockaddr_in serverAddr;
 
 bool tlsInit = false;
+int tlsSocketServerFd = -1;
+struct sockaddr_in tlsServerAddr;
 
 SSL_CTX *serverTlsCtx = NULL;
 SSL_CTX *clientTlsCtx = NULL;

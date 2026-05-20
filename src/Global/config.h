@@ -52,6 +52,8 @@ extern int socketServerFd;
 extern struct sockaddr_in serverAddr;
 
 extern bool tlsInit;
+extern int tlsSocketServerFd;
+extern struct sockaddr_in tlsServerAddr;
 
 extern SSL_CTX *serverTlsCtx;
 extern SSL_CTX *clientTlsCtx;
