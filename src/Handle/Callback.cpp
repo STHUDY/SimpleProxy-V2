@@ -315,6 +315,7 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
             SSL_set_shutdown(tlsClientInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(tlsClientInfo->ssl);
             SSL_free(tlsClientInfo->ssl);
+            SSL_CTX_free(tlsClientInfo->ssl_ctx);
         }
         if (tlsClientInfo->fd >= 0)
         {
@@ -349,6 +350,7 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
             SSL_set_shutdown(aConnectInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(aConnectInfo->ssl);
             SSL_free(aConnectInfo->ssl);
+            SSL_CTX_free(aConnectInfo->ssl_ctx);
         }
         if (aConnectInfo->fd >= 0)
         {
@@ -360,6 +362,7 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
             SSL_set_shutdown(bConnectInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(bConnectInfo->ssl);
             SSL_free(bConnectInfo->ssl);
+            SSL_CTX_free(bConnectInfo->ssl_ctx);
             bConnectInfo->ssl = NULL; // 避免重复释放
         }
         if (bConnectInfo->fd >= 0)
@@ -387,6 +390,8 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
 {
     SSL *aSsl = aConnectInfo->ssl;
     SSL *bSsl = bConnectInfo->ssl;
+    SSL_CTX *aSslCtx = aConnectInfo->ssl_ctx;
+    SSL_CTX *bSslCtx = bConnectInfo->ssl_ctx;
     int aSocket = aConnectInfo->fd;
     int bSocket = bConnectInfo->fd;
 
@@ -412,6 +417,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
             SSL_set_shutdown(bSsl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(bSsl);
             SSL_free(bSsl);
+            SSL_CTX_free(bSslCtx);
         }
         if (bSocket >= 0)
         {
@@ -424,6 +430,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
             SSL_set_shutdown(aSsl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(aSsl);
             SSL_free(aSsl);
+            SSL_CTX_free(aSslCtx);
         }
         if (aSocket >= 0)
         {

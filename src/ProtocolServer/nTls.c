@@ -3,7 +3,7 @@
 static SSL_CTX *createContext(bool isServer)
 {
     const SSL_METHOD *method;
-    SSL_CTX *ctx;
+    SSL_CTX *ctx = NULL;
 
     if (isServer)
         method = TLS_server_method();
@@ -15,30 +15,30 @@ static SSL_CTX *createContext(bool isServer)
     {
         logOutputErrorConsoleCharString("Error: Unable to create SSL context");
         ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
     }
 
     return ctx;
 }
 
-static void configureServerContext(SSL_CTX *ctx)
+static bool configureServerContext(SSL_CTX *ctx)
 {
     if (SSL_CTX_use_certificate_chain_file(ctx, tlsCertFileChar) <= 0)
     {
         logOutputErrorConsoleCharString("Error: Unable to load certificate file");
         ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
+        return false;
     }
 
     if (SSL_CTX_use_PrivateKey_file(ctx, tlsKeyFileChar, SSL_FILETYPE_PEM) <= 0)
     {
         logOutputErrorConsoleCharString("Error: Unable to load private key file");
         ERR_print_errors_fp(stderr);
-        exit(EXIT_FAILURE);
+        return false;
     }
+    return true;
 }
 
-static void configureClientContext(SSL_CTX *ctx)
+static bool configureClientContext(SSL_CTX *ctx)
 {
     /*
      * Configure the client to abort the handshake if certificate verification
@@ -51,6 +51,7 @@ static void configureClientContext(SSL_CTX *ctx)
     {
         logOutputWarnConsoleCharString("Warning: Unable to load system certificate trust store, backend certificate verification will be disabled");
     }
+    return true;
 }
 
 static bool isValidTlsHost(const char *host)
@@ -64,12 +65,6 @@ void initTlsServer()
 
     signal(SIGPIPE, SIG_IGN);
     logOutputInfoConsoleCharString("Init tls server");
-
-    serverTlsCtx = createContext(true);
-    configureServerContext(serverTlsCtx);
-
-    clientTlsCtx = createContext(false);
-    configureClientContext(clientTlsCtx);
 
     logOutputDebugConsoleCharString("Init tls server context success");
 
@@ -252,7 +247,9 @@ void listenTlsServer(TlsClientCallback callback)
         clientIp[INET_ADDRSTRLEN - 1] = '\0';
         int clientPort = ntohs(clientAddr.sin_port);
 
-        SSL *ssl = SSL_new(serverTlsCtx);
+        SSL_CTX *ctx = createContext(true);
+        configureServerContext(ctx);
+        SSL *ssl = SSL_new(ctx);
         SSL_set_fd(ssl, clientFd);
         int sslAccept = 0;
         int sslConnErr = 0;
@@ -309,6 +306,7 @@ void listenTlsServer(TlsClientCallback callback)
                 SSL_set_shutdown(ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
                 SSL_shutdown(ssl);
                 SSL_free(ssl);
+                SSL_CTX_free(ctx);
             }
 
             if (clientFd >= 0)
@@ -319,7 +317,7 @@ void listenTlsServer(TlsClientCallback callback)
 
         TlsClientInfo clientInfo = {0};
         clientInfo.fd = clientFd;
-        clientInfo.ssl_ctx = serverTlsCtx;
+        clientInfo.ssl_ctx = ctx;
         clientInfo.ssl = ssl;
         memcpy(&clientInfo.addr, &clientAddr, sizeof(clientAddr));
         clientInfo.addr_len = sizeof(clientAddr);
@@ -363,7 +361,10 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
         return -1;
     }
 
-    SSL *ssl = SSL_new(clientTlsCtx);
+    SSL_CTX *ctx = createContext(false);
+    configureClientContext(ctx);
+
+    SSL *ssl = SSL_new(ctx);
     SSL_set_fd(ssl, socketInfo.fd);
 
     if (isValidTlsHost(sni))
@@ -390,12 +391,13 @@ int connectTlsServer(TlsClientInfo *client_info, const char *sni)
         logOutputErrorConsoleCharString(error_string);
         SSL_shutdown(ssl);
         SSL_free(ssl);
+        SSL_CTX_free(ctx);
         close(socketInfo.fd);
         return -1;
     }
 
     client_info->fd = socketInfo.fd;
-    client_info->ssl_ctx = clientTlsCtx;
+    client_info->ssl_ctx = ctx;
     client_info->ssl = ssl;
     memcpy(&client_info->addr, &socketInfo.addr, sizeof(socketInfo.addr));
     client_info->addr_len = socketInfo.addr_len;
@@ -409,16 +411,6 @@ void closeTlsResource()
 {
     logOutputInfoConsoleCharString("Cleaning up all TLS resources...");
     TlsServerRun = false;
-    if (serverTlsCtx)
-    {
-        SSL_CTX_free(serverTlsCtx);
-        serverTlsCtx = NULL;
-    }
-    if (clientTlsCtx)
-    {
-        SSL_CTX_free(clientTlsCtx);
-        clientTlsCtx = NULL;
-    }
     OPENSSL_cleanup();
     tlsInit = false;
     logOutputInfoConsoleCharString("All TLS resources cleaned up.");
