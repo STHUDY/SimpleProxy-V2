@@ -292,8 +292,12 @@ void listenTlsServer(TlsClientCallback callback)
 
         int sslAccept = 0;
         int sslConnErr = 0;
+        long timeStartMs = 0;
 
-        long timeStartMs = getCurrentRunTimeMillis();
+        if (SslAcceptTimeoutMs != -1 && TlsNoBlock)
+        {
+            timeStartMs = getCurrentRunTimeMillis();
+        }
 
         while (TlsServerRun)
         {
@@ -323,12 +327,15 @@ void listenTlsServer(TlsClientCallback callback)
                 if (timeCount > PollingIntervalMs)
                     timeCount = PollingIntervalMs * 1000;
 
-                long deltaMs = getCurrentRunTimeMillis() - timeStartMs;
-
-                if (deltaMs > SslAcceptTimeoutMs)
+                if (SslAcceptTimeoutMs != -1 && TlsNoBlock)
                 {
-                    logOutputErrorConsoleCharString("SSL accept timeout");
-                    break;
+                    long deltaMs = getCurrentRunTimeMillis() - timeStartMs;
+
+                    if (deltaMs > SslAcceptTimeoutMs)
+                    {
+                        logOutputErrorConsoleCharString("SSL accept timeout");
+                        break;
+                    }
                 }
 
                 logOutputDebugConsoleCharString("SSL accept want read or want write");
