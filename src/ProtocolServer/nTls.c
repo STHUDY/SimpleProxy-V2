@@ -225,7 +225,6 @@ void listenTlsServer(TlsClientCallback callback)
                 break;
 
             case EMFILE:
-            case ENFILE:
                 // 进程/系统 fd 用完（严重错误）
                 logOutputErrorConsoleCharString("Too many open files - system resource exhausted");
                 usleep(PollingIntervalMs * 1000); // 休眠一下避免死循环
