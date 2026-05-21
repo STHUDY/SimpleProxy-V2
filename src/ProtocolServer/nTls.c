@@ -1,4 +1,10 @@
 #include "nTls.h" // 根据实际情况包含头文件
+long long getCurrentRunTimeMillis()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 static SSL_CTX *createContext(bool isServer)
 {
@@ -137,6 +143,7 @@ void initTlsServer()
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), "Init tls socket server failed: listen() error - %s", strerror(errno));
         logOutputErrorConsoleCharString(error_msg);
+        exit(EXIT_FAILURE);
     }
 
     char success_msg[256];
@@ -272,9 +279,21 @@ void listenTlsServer(TlsClientCallback callback)
             close(clientFd);
             continue;
         }
+        if (TlsNoBlock)
+        {
+            int flags = fcntl(clientFd, F_GETFL, 0);
+            fcntl(clientFd, F_SETFL, flags | O_NONBLOCK);
+        }
         SSL_set_fd(ssl, clientFd);
+        if (TlsNoBlock)
+        {
+            SSL_set_mode(ssl, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+        }
+
         int sslAccept = 0;
         int sslConnErr = 0;
+
+        long timeStartMs = getCurrentRunTimeMillis();
 
         while (TlsServerRun)
         {
@@ -293,11 +312,26 @@ void listenTlsServer(TlsClientCallback callback)
 
             sslConnErr = SSL_get_error(ssl, sslAccept);
 
+            if (TlsNoBlock)
+            {
+                end = clock();
+            }
+
             if (sslConnErr == SSL_ERROR_WANT_READ || sslConnErr == SSL_ERROR_WANT_WRITE)
             {
                 int timeCount = ((end - start) * 1000000) / CLOCKS_PER_SEC;
                 if (timeCount > PollingIntervalMs)
                     timeCount = PollingIntervalMs * 1000;
+
+                long deltaMs = getCurrentRunTimeMillis() - timeStartMs;
+
+                if (deltaMs > SslAcceptTimeoutMs)
+                {
+                    logOutputErrorConsoleCharString("SSL accept timeout");
+                    break;
+                }
+
+                logOutputDebugConsoleCharString("SSL accept want read or want write");
 
                 usleep(timeCount);
                 continue;
@@ -305,11 +339,6 @@ void listenTlsServer(TlsClientCallback callback)
             else
             {
                 break;
-            }
-
-            if (TlsNoBlock)
-            {
-                end = clock();
             }
         }
 

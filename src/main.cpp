@@ -160,6 +160,8 @@ int main(int argc, char *argv[])
         TlsEnbale = config["config"]["tls"]["enable"].as<bool>();
         TlsNoBlock = config["config"]["tls"]["noBlock"].as<bool>();
         TlsNoBlockConnect = config["config"]["tls"]["noBlockConnect"].as<bool>();
+        SslAcceptTimeoutMs = config["config"]["tls"]["acceptTimeoutMs"].as<int>();
+
 
         SocketEnableSync = config["config"]["socket"]["enableSync"].as<bool>();
         SocketNoBlockConnect = config["config"]["socket"]["noBlockConnect"].as<bool>();

@@ -312,7 +312,6 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
         logOutputErrorConsole("SECURITY: TLS Access denied - IP '" + std::string(tlsClientInfo->ip_str) + "' is blocked by firewall rules");
         if (tlsClientInfo->ssl)
         {
-            SSL_set_shutdown(tlsClientInfo->ssl, SSL_RECEIVED_SHUTDOWN | SSL_SENT_SHUTDOWN);
             SSL_shutdown(tlsClientInfo->ssl);
             SSL_free(tlsClientInfo->ssl);
             SSL_CTX_free(tlsClientInfo->ssl_ctx);
@@ -518,12 +517,6 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
         {
             int activeFd = events[i].data.fd;
             uint32_t eventFlags = events[i].events;
-            if (eventFlags & (EPOLLHUP | EPOLLRDHUP | EPOLLERR))
-            {
-                logOutputErrorConsole("tls Proxy: EPOLLHUP | EPOLLRDHUP | EPOLLERR on fd " + std::to_string(activeFd));
-                isBreak = true;
-                break;
-            }
             if (eventFlags & EPOLLIN)
             {
                 SSL *srcSsl = activeFd == aSocket ? aSsl : bSsl;
@@ -600,13 +593,34 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                         i++;
                         continue;
                     }
-                    if (recvErrno == SSL_ERROR_ZERO_RETURN)
+                    else if (recvErrno == SSL_ERROR_SYSCALL)
+                    {
+                        int sys_errno = errno;
+                        if (sys_errno == 0)
+                        {
+                            logOutputInfoConsole("tls Proxy: aSsl connection closed cleanly");
+                        }
+                        else if (sys_errno == ECONNRESET || sys_errno == EPIPE)
+                        {
+                            logOutputInfoConsole("tls Proxy: aSsl connection reset by peer");
+                        }
+                        else
+                        {
+                            logOutputErrorConsole("tls Proxy: aSsl read syscall error: " + std::string(strerror(sys_errno)));
+                        }
+                    }
+                    else if (recvErrno == SSL_ERROR_ZERO_RETURN)
                         logOutputInfoConsole("tls Proxy: aSsl closed connection");
                     else
                         logOutputErrorConsole("tls Proxy: aSsl read failed code: " + std::to_string(recvErrno));
                     isBreak = true;
                     break;
                 }
+            }
+            else
+            {
+                logOutputErrorConsole("tls Proxy: " + std::to_string(eventFlags) + " on fd " + std::to_string(activeFd));
+                isBreak = true;
             }
 
             if (isBreak)

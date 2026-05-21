@@ -5,6 +5,7 @@ config:
     enable: false  # 如果要处理HTTPS/TLS流量，请设置为true，并确保cert和key文件存在
     noBlock: false
     noBlockConnect: true
+    acceptTimeoutMs: 5000
   socket:
     enableSync: false
     noBlockConnect: true

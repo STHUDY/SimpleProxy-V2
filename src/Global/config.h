@@ -52,6 +52,7 @@ extern int socketServerFd;
 extern struct sockaddr_in serverAddr;
 
 extern bool tlsInit;
+extern int SslAcceptTimeoutMs;
 extern int tlsSocketServerFd;
 extern struct sockaddr_in tlsServerAddr;
 

@@ -49,5 +49,6 @@ int socketServerFd = -1;
 struct sockaddr_in serverAddr;
 
 bool tlsInit = false;
+int SslAcceptTimeoutMs = -1;
 int tlsSocketServerFd = -1;
 struct sockaddr_in tlsServerAddr;
