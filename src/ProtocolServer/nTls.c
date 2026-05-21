@@ -206,7 +206,7 @@ void listenTlsServer(TlsClientCallback callback)
             end = clock();
         }
 
-        if (clientFd < 0)
+        if (clientFd <= 0)
         {
             switch (errno)
             {
