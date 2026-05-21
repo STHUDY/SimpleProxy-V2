@@ -211,7 +211,7 @@ void listenTlsServer(TlsClientCallback callback)
             switch (errno)
             {
             case EWOULDBLOCK:
-                if (SocketNoBlockConnect)
+                if (TlsNoBlockConnect)
                 {
                     int timeCount = ((end - start) * 1000000) / CLOCKS_PER_SEC;
                     if (timeCount > PollingIntervalMs)
