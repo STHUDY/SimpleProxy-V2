@@ -560,13 +560,13 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                             {
                                 fd_set writefds;
                                 FD_ZERO(&writefds);
-                                FD_SET(bSocket, &writefds);
+                                FD_SET(activeFd, &writefds);
 
                                 struct timeval timeoutUse = {
                                     static_cast<time_t>(PollingIntervalMs / 1000),
                                     static_cast<suseconds_t>((PollingIntervalMs % 1000) * 1000)};
 
-                                int ret = select(bSocket + 1, NULL, &writefds, NULL, &timeoutUse);
+                                int ret = select(activeFd + 1, NULL, &writefds, NULL, &timeoutUse);
                                 if (ret <= 0)
                                 {
                                     logOutputErrorConsole("tls Proxy: bSsl write select failed: " + std::string(strerror(errno)));
