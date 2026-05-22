@@ -1,24 +1,34 @@
 config:
-  timeout: 5
-  pollingIntervalMs: 1000
-  tls: 
-    enable: false  # 如果要处理HTTPS/TLS流量，请设置为true，并确保cert和key文件存在
-    noBlock: false
+  socket:
+    ioUseMode: none
+    noBlockReadOrWrite: true
     noBlockConnect: true
     acceptTimeoutMs: 5000
-  socket:
-    enableSync: false
+    connectTimeoutMs: 5000
+    pollingIntervalMs: 1000
+    readOrWriteTimeoutMs: 5000
+  tls: 
+    enable: false  # 如果要处理HTTPS/TLS流量，请设置为true，并确保cert和key文件存在
+    socketIoUseMode: none
+    sslIoUseMode: none
+    useThreadpoolSslAccept: true
+    noBlockReadOrWrite: false
     noBlockConnect: true
+    acceptTimeoutMs: 5000
+    connectTimeoutMs: 5000
+    pollingIntervalMs: 1000
+    readOrWriteTimeoutMs: 5000
   log:
     enable: true 
     console: true
+    file: true
     level: debug
     filePath: "./proxy.log"
   threadPool:
     minWokers: 10
     maxWokers: 1000
     clearThreadTimeMs: 60000
-    waitTimeMs: 1000
+    pollingIntervalMs: 1000
     stepAddThreadNumber: 10
 server:
   host: 0.0.0.0
@@ -40,4 +50,4 @@ client:
   tls:
     hostname: 0.0.0.0  # 目标服务器主机名（用于证书验证）
     sni: 0.0.0.0       # SNI扩展（通常与hostname相同）
-    caCert:            # CA证书文件路径（可选，用于自定义CA验证）
+    cert:            # CA证书文件路径（可选，用于自定义CA验证）

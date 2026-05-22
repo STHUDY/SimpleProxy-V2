@@ -2,20 +2,20 @@
 
 static bool isIpAllowed(const std::string &ip_str)
 {
-    auto ban_it = std::find(banIpList.begin(), banIpList.end(), ip_str);
-    if (ban_it != banIpList.end())
+    auto ban_it = std::find(gServerConnectBanIpsList.begin(), gServerConnectBanIpsList.end(), ip_str);
+    if (ban_it != gServerConnectBanIpsList.end())
     {
         return false; // IP 被禁止
     }
 
-    if (allowIpList.empty())
+    if (gServerConnectAllowIpsList.empty())
     {
         return true;
     }
 
     // 如果白名单不为空，只有在白名单中的 IP 才能访问
-    auto allow_it = std::find(allowIpList.begin(), allowIpList.end(), ip_str);
-    if (allow_it != allowIpList.end())
+    auto allow_it = std::find(gServerConnectAllowIpsList.begin(), gServerConnectAllowIpsList.end(), ip_str);
+    if (allow_it != gServerConnectAllowIpsList.end())
     {
         return true;
     }
@@ -110,8 +110,8 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
     shareInfo->mutex = new std::mutex;
     shareInfo->close = false;
 
-    threadPool.pushMission(socketProxyWorkerSingle, aConnectInfo, bConnectInfo, clientSocketBufferSize, shareInfo, std::string("client -> proxy -> server "));
-    threadPool.pushMission(socketProxyWorkerSingle, bConnectInfo, aConnectInfo, serverSocketBufferSize, shareInfo, std::string("server -> proxy -> client "));
+    rgThreadPool.pushMission(socketProxyWorkerSingle, aConnectInfo, bConnectInfo, gClientSocketBufferSize, shareInfo, std::string("client -> proxy -> server "));
+    rgThreadPool.pushMission(socketProxyWorkerSingle, bConnectInfo, aConnectInfo, gServerSocketBufferSize, shareInfo, std::string("server -> proxy -> client "));
 }
 
 void socketListenerCallback()
@@ -121,164 +121,118 @@ void socketListenerCallback()
 
 void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *bConnectInfo, size_t bufferSize, CallbackShareInfo *shareInfo, std::string headText)
 {
-    // 调用方必须保证socket有效
-
     std::mutex *mutex = shareInfo->mutex;
-
     int aSocket = aConnectInfo->fd;
     int bSocket = bConnectInfo->fd;
-
     char *buffer = new char[bufferSize];
-
     std::unique_lock<std::mutex> ulock(*mutex);
 
-    const float PollTimeSeconds = (float)PollingIntervalMs / 1000.0f;
-
-    fd_set readfds, writefds, exceptfds;
-
-    if (shareInfo->init == false && SocketEnableSync == false)
+    if (shareInfo->init == false)
     {
-        fcntl(aSocket, F_SETFL, O_NONBLOCK);
-        fcntl(bSocket, F_SETFL, O_NONBLOCK);
+        if (gConfigSocketNoBlockReadOrWrite)
+        {
+            int flags;
+            flags = fcntl(aSocket, F_GETFL, 0);
+            if (flags != -1)
+                fcntl(aSocket, F_SETFL, flags | O_NONBLOCK);
+            flags = fcntl(bSocket, F_GETFL, 0);
+            if (flags != -1)
+                fcntl(bSocket, F_SETFL, flags | O_NONBLOCK);
+        }
+        else if (gConfigSocketReadOrWriteTimeoutMs > 0)
+        {
+            struct timeval tv;
+            tv.tv_sec = gConfigSocketReadOrWriteTimeoutMs / 1000;
+            tv.tv_usec = (gConfigSocketReadOrWriteTimeoutMs % 1000) * 1000;
+            setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+            setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            setsockopt(bSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+            setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        }
         shareInfo->init = true;
     }
 
-    if (SocketEnableSync == false)
-        ulock.unlock();
-
-    while (SocketServerRun)
+    if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
-        if (SocketEnableSync == true)
-            ulock.unlock();
-
-        FD_ZERO(&readfds);
-        FD_ZERO(&exceptfds);
-        FD_SET(aSocket, &readfds);
-        FD_SET(aSocket, &exceptfds);
-
-        struct timeval timeoutUse = {
-            static_cast<time_t>(PollingIntervalMs / 1000),
-            static_cast<suseconds_t>((PollingIntervalMs % 1000) * 1000)};
-
-        int result = select(aSocket + 1, &readfds, nullptr, &exceptfds, &timeoutUse);
-
-        if (SocketEnableSync == true)
-            ulock.lock();
-
-        if (shareInfo->close == true)
+        ulock.unlock();
+        bool isBreak = false;
+        struct timespec lastPoll, now;
+        if (gConfigSocketNoBlockReadOrWrite)
         {
-            logOutputInfoConsole(headText + "Connection closed");
-            break;
+            clock_gettime(CLOCK_MONOTONIC, &lastPoll);
         }
-
-        if (result < 0)
+        while (rgSocketServerRun)
         {
-            if (errno == EINTR)
-                continue;
-            logOutputErrorConsole(headText + "select error on aSocket: " + std::string(strerror(errno)));
-            break;
-        }
-        if (result == 0)
-        {
-            if (SocketEnableSync == false)
-                ulock.lock();
-            shareInfo->timeout += PollTimeSeconds / 2;
-            if (SocketEnableSync == false)
-                ulock.unlock();
-            if (ConnectTimeout > 0 && shareInfo->timeout > ConnectTimeout)
+            if (shareInfo->close == true)
             {
-                logOutputWarnConsole(headText + "Connect timeout " + std::to_string(shareInfo->timeout));
                 break;
             }
-            else
-                continue;
-        }
-        if (SocketEnableSync == false)
-            ulock.lock();
-        shareInfo->timeout = 0;
-        if (SocketEnableSync == false)
-            ulock.unlock();
 
-        if (FD_ISSET(aSocket, &exceptfds))
-        {
-            logOutputErrorConsole(headText + "Exception detected on aSocket");
-            break;
-        }
-
-        ssize_t recvNum = 0;
-        recvNum = recv(aSocket, buffer, bufferSize, 0);
-        if (recvNum < 0)
-        {
-            if (errno == EAGAIN || errno == EWOULDBLOCK)
-                continue;
-            logOutputErrorConsole(headText + "recv error on aSocket: " + std::string(strerror(errno)));
-            break;
-        }
-        if (recvNum == 0)
-        {
-            logOutputInfoConsole(headText + "aSocket closed by peer (recv=0)");
-            break;
-        }
-
-        logOutputDebugConsole(headText + "Received " + std::to_string(recvNum) + " bytes from aSocket");
-
-        if (SocketEnableSync == true)
-            ulock.unlock();
-
-        FD_ZERO(&writefds);
-        FD_SET(bSocket, &writefds);
-        FD_SET(bSocket, &exceptfds);
-        timeoutUse = {
-            static_cast<time_t>(PollingIntervalMs / 1000),
-            static_cast<suseconds_t>((PollingIntervalMs % 1000) * 1000)};
-
-        result = select(bSocket + 1, nullptr, &writefds, &exceptfds, &timeoutUse);
-
-        if (SocketEnableSync == true)
-            ulock.lock();
-
-        if (shareInfo->close == true)
-        {
-            logOutputInfoConsole(headText + "Connection closed");
-            break;
-        }
-        if (result <= 0)
-        {
-            logOutputErrorConsole(headText + (result < 0 ? "select error before send: " + std::string(strerror(errno)) : "Send timeout waiting for bSocket writable"));
-            break;
-        }
-        if (FD_ISSET(bSocket, &exceptfds))
-        {
-            logOutputErrorConsole(headText + "Exception on bSocket before send");
-            break;
-        }
-
-        size_t sendTotal = 0;
-        bool isBreak = false;
-
-        while (sendTotal < recvNum && SocketServerRun)
-        {
-            int sendNum = send(bSocket, buffer + sendTotal, recvNum - sendTotal, MSG_NOSIGNAL); // 修复：发送到 bSocket
-            if (sendNum < 0)
+            if (shareInfo->timeout > gConfigSocketReadOrWriteTimeoutMs)
             {
-                logOutputErrorConsole(headText + "send error on bSocket: " + std::string(strerror(errno))); // 修复：日志更明确
+                break;
+            }
+
+            ssize_t recvLen = recv(aSocket, buffer, bufferSize, 0);
+            if (recvLen < 0)
+            {
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                {
+                    clock_gettime(CLOCK_MONOTONIC, &now);
+                    long elapsedUs = (now.tv_sec - lastPoll.tv_sec) * 1000000L +
+                                     (now.tv_nsec - lastPoll.tv_nsec) / 1000L;
+                    long intervalUs = gConfigSocketPollingIntervalMs * 1000L;
+
+                    shareInfo->timeout += (float)elapsedUs / 2000.0f;
+
+                    if (elapsedUs < intervalUs)
+                    {
+                        usleep(intervalUs - elapsedUs);
+                    }
+                    clock_gettime(CLOCK_MONOTONIC, &lastPoll);
+                    continue;
+                }
                 isBreak = true;
                 break;
             }
-            sendTotal += sendNum;
-        }
-        if (isBreak)
-            break;
-        if (SocketEnableSync == false)
-            ulock.lock();
-        shareInfo->timeout = 0;
-        if (SocketEnableSync == false)
-            ulock.unlock();
-        logOutputDebugConsole(headText + "Sent " + std::to_string(sendTotal) + " bytes to bSocket");
-    }
+            if (recvLen == 0)
+            {
+                isBreak = true;
+            }
+            ssize_t sentTotal = 0;
+            while (sentTotal < recvLen)
+            {
+                ssize_t sentLen = send(aSocket, buffer + sentTotal, recvLen - sentTotal, 0);
+                if (sentLen < 0)
+                {
+                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    {
+                        clock_gettime(CLOCK_MONOTONIC, &now);
+                        long elapsedUs = (now.tv_sec - lastPoll.tv_sec) * 1000000L +
+                                         (now.tv_nsec - lastPoll.tv_nsec) / 1000L;
+                        long intervalUs = gConfigSocketPollingIntervalMs * 1000L;
 
-    if (SocketEnableSync == true)
-        ulock.unlock();
+                        shareInfo->timeout += (float)elapsedUs / 2000.0f;
+
+                        if (elapsedUs < intervalUs)
+                        {
+                            usleep(intervalUs - elapsedUs);
+                        }
+                        clock_gettime(CLOCK_MONOTONIC, &lastPoll);
+                        continue;
+                    }
+                    isBreak = true;
+                    break;
+                }
+                sentTotal += sentLen;
+            }
+
+            if (isBreak)
+            {
+                break;
+            }
+        }
+    }
 
     delete[] buffer;
 
@@ -330,14 +284,14 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
     std::string sniStr;
     const char *sni = NULL;
 
-    if (tlsClientSni == "")
+    if (gClientTlsSniChar == "")
     {
         sni = SSL_get_servername(aConnectInfo->ssl, TLSEXT_NAMETYPE_host_name);
         sniStr = sni;
     }
     else
     {
-        sniStr = tlsClientSni;
+        sniStr = gClientTlsSniChar;
         sni = sniStr.c_str();
     }
 
@@ -375,7 +329,7 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
 
     logOutputInfoConsole("New TLS connection established - Client: " + clientAddr + " (SNI: " + sniStr + ") -> Backend");
 
-    threadPool.pushMission(tlsProxyWorker, aConnectInfo, bConnectInfo);
+    rgThreadPool.pushMission(tlsProxyWorker, aConnectInfo, bConnectInfo);
 }
 
 void tlsListenerCallback()
@@ -395,8 +349,8 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
     // 初始化为-1表示未创建
     int epollFd = -1;
 
-    char *bufferAtoB = new char[clientSocketBufferSize];
-    char *bufferBtoA = new char[serverSocketBufferSize];
+    char *bufferAtoB = new char[gClientSocketBufferSize];
+    char *bufferBtoA = new char[gServerSocketBufferSize];
 
     // 用于标记是否需要执行清理逻辑的 lambda
     auto cleanup = [&]()
@@ -436,10 +390,25 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
         logOutputInfoConsole("TLS proxy worker stopped");
     };
 
-    if (TlsNoBlock)
+    if (gConfigTlsNoBlockReadOrWrite)
     {
-        fcntl(aSocket, F_SETFL, O_NONBLOCK);
-        fcntl(bSocket, F_SETFL, O_NONBLOCK);
+        int flags;
+        flags = fcntl(aSocket, F_GETFL, 0);
+        if (flags != -1)
+            fcntl(aSocket, F_SETFL, flags | O_NONBLOCK);
+        flags = fcntl(bSocket, F_GETFL, 0);
+        if (flags != -1)
+            fcntl(bSocket, F_SETFL, flags | O_NONBLOCK);
+    }
+    else if (gConfigTlsReadOrWriteTimeoutMs > 0)
+    {
+        struct timeval tv;
+        tv.tv_sec = gConfigTlsReadOrWriteTimeoutMs / 1000;
+        tv.tv_usec = (gConfigTlsReadOrWriteTimeoutMs % 1000) * 1000;
+        setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(bSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     }
 
     logOutputInfoConsole("TLS proxy worker started");
@@ -480,12 +449,12 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
         return;
     }
 
-    const float PollTimeSeconds = (float)PollingIntervalMs / 1000.0f;
+    const float PollTimeSeconds = (float)gConfigTlsPollingIntervalMs / 1000.0f;
     float timeout = 0;
 
-    while (TlsServerRun)
+    while (rgTlsServerRun)
     {
-        int eventsNumber = epoll_wait(epollFd, events, 2, PollingIntervalMs);
+        int eventsNumber = epoll_wait(epollFd, events, 2, gConfigTlsPollingIntervalMs);
         if (eventsNumber == -1)
         {
             if (errno == EINTR)
@@ -498,7 +467,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
         if (eventsNumber == 0)
         {
             timeout += PollTimeSeconds;
-            if (ConnectTimeout > 0 && timeout > ConnectTimeout)
+            if (gConfigTlsReadOrWriteTimeoutMs > 0 && timeout > gConfigTlsReadOrWriteTimeoutMs)
             {
                 logOutputWarnConsole("tls Proxy: Timeout while waiting for epoll events " + std::to_string(timeout));
                 break;
@@ -523,10 +492,10 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                 SSL *dstSsl = activeFd == aSocket ? bSsl : aSsl;
                 bool isAtoB = activeFd == aSocket;
                 char *buffer = isAtoB ? bufferAtoB : bufferBtoA;
-                int bufferSize = isAtoB ? clientSocketBufferSize : serverSocketBufferSize;
+                int bufferSize = isAtoB ? gClientSocketBufferSize : gServerSocketBufferSize;
 
                 int sslReadNum = SSL_read(srcSsl, buffer, bufferSize);
-                if (TlsNoBlock == false)
+                if (gConfigTlsNoBlockReadOrWrite == false)
                 {
                     if (SSL_pending(srcSsl) == 0)
                     {
@@ -538,7 +507,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                 {
                     logOutputDebugConsole((isAtoB ? "tls client -> proxy: " : "tls server -> proxy: ") + std::to_string(sslReadNum) + " bytes from aSocket");
                     size_t sentTotal = 0;
-                    while (TlsServerRun && sentTotal < sslReadNum)
+                    while (rgTlsServerRun && sentTotal < sslReadNum)
                     {
                         int sentNum = SSL_write(dstSsl, buffer + sentTotal, sslReadNum - sentTotal);
                         if (sentNum > 0)
@@ -556,8 +525,8 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                                 FD_SET(activeFd, &writefds);
 
                                 struct timeval timeoutUse = {
-                                    static_cast<time_t>(PollingIntervalMs / 1000),
-                                    static_cast<suseconds_t>((PollingIntervalMs % 1000) * 1000)};
+                                    static_cast<time_t>(gConfigSocketPollingIntervalMs / 1000),
+                                    static_cast<suseconds_t>((gConfigSocketPollingIntervalMs % 1000) * 1000)};
 
                                 int ret = select(activeFd + 1, NULL, &writefds, NULL, &timeoutUse);
                                 if (ret <= 0)
@@ -567,7 +536,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                                     break;
                                 }
                                 timeout += PollTimeSeconds;
-                                if (timeout > ConnectTimeout)
+                                if (timeout > gConfigTlsConnectTimeoutMs)
                                 {
                                     logOutputWarnConsole("tls Proxy: Timeout while waiting for epoll events " + std::to_string(timeout));
                                     isBreak = true;

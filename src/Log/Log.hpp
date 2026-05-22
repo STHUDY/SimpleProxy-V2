@@ -1,6 +1,9 @@
 #pragma once
 #include "headfile.h"
 
+void logOutputFatalConsole(const char *msg);
+void logOutputFatalConsole(const std::string &msg);
+
 void logOutputErrorConsole(const char *msg);
 void logOutputErrorConsole(const std::string &msg);
 

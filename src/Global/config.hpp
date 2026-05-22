@@ -1,23 +1,18 @@
 #pragma once
 #include "headfile.h"
 
-extern std::string LogLevel;
-extern std::string LogFilePath;
+extern std::string gConfigLogFilePathString;
 
-extern std::string serverHost;
-extern std::string clientHost;
+extern std::string gServerHostString;
+extern std::string gServerTlsCertFileString;
+extern std::string gServerTlsKeyFileString;
+extern std::vector<std::string> gServerConnectAllowIpsList;
+extern std::vector<std::string> gServerConnectBanIpsList;
 
-extern ThreadpoolAutoCtrlByTime threadPool;
+extern std::string gClientHostString;
 
-extern std::vector<std::string> allowIpList;
-extern std::vector<std::string> banIpList;
+extern std::string gClientHostNameString;
+extern std::string gClientSniString;
+extern std::string gServerCertFileString;
 
-// extern std::unordered_set<int> ActiveSocketList;
-// extern std::mutex ActiveSocketsListMutex;
-
-extern std::string tlsCertFile;
-extern std::string tlsKeyFile;
-
-extern std::string tlsClientHostName;
-extern std::string tlsClientSni;
-extern std::string tlsServerCaFile;
+extern ThreadpoolAutoCtrlByTime rgThreadPool;

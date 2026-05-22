@@ -1,12 +1,14 @@
 #include "Log.hpp"
 
 // ANSI颜色代码
-const std::string RESET = "\033[0m";
-const std::string RED = "\033[31m";
-const std::string YELLOW = "\033[33m";
-const std::string GREEN = "\033[32m";
-const std::string BLUE = "\033[34m";
+const std::string DEBUG_COLOR = "\033[0;32m"; // 绿色
+const std::string INFO_COLOR = "\033[0;34m";  // 蓝色
+const std::string WARN_COLOR = "\033[0;33m";  // 黄色
+const std::string ERROR_COLOR = "\033[0;31m"; // 红色
+const std::string FATAL_COLOR = "\033[0;35m"; // 紫色
+const std::string RESET_COLOR = "\033[0m";
 
+// 获取当前时间字符串
 std::string getCurrentTime()
 {
     static char time_str[100];
@@ -16,209 +18,127 @@ std::string getCurrentTime()
     return time_str;
 }
 
-void logOutputErrorConsole(const char *msg)
+// 内部辅助函数：写入文件（线程安全）
+static void writeToFile(const std::string &level, const std::string &msg)
 {
-    if (LogEnbale && LogLevelNumber <= 3)
+    if (!gConfigLogEnbaleFile)
+        return;
+
+    std::string outputMsg = "[" + getCurrentTime() + "] [" + level + "] " + msg;
+
+    pthread_mutex_lock(&rgLogWriteFileMutex);
+    if (rgLogFileOpen == NULL)
     {
-        // 构建统一的消息字符串
-        std::string outputMsg = "[" + getCurrentTime() + "] [ERROR] " + std::string(msg);
-
-        if (LogEnbaleConsole)
+        rgLogFileOpen = fopen(gConfigLogFileChar, "a");
+        if (rgLogFileOpen == NULL)
         {
-            std::cout << RED << outputMsg << RESET << std::endl;
-        }
+            // 无法打开文件，禁用文件日志并输出错误到控制台（避免递归）
+            gConfigLogEnbaleFile = false;
+            pthread_mutex_unlock(&rgLogWriteFileMutex);
 
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            fprintf(LogFile, "%s\n", outputMsg.c_str());
-            fflush(LogFile);
-            pthread_mutex_unlock(&LogMutex);
+            // 直接输出到控制台（不使用文件日志，防止递归）
+            std::cerr << "[" << getCurrentTime() << "] [ERROR] "
+                      << "open log file error: " << strerror(errno)
+                      << " will not write log to file" << std::endl;
+            return;
         }
     }
+    fprintf(rgLogFileOpen, "%s\n", outputMsg.c_str());
+    fflush(rgLogFileOpen);
+    pthread_mutex_unlock(&rgLogWriteFileMutex);
+}
+
+// ---------- FATAL ----------
+void logOutputFatalConsole(const char *msg)
+{
+    logOutputFatalConsole(std::string(msg));
+}
+
+void logOutputFatalConsole(const std::string &msg)
+{
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_FATAL)
+    {
+        std::string outputMsg = "[" + getCurrentTime() + "] [FATAL] " + msg;
+        if (gConfigLogEnbaleConsole)
+        {
+            std::cout << FATAL_COLOR << outputMsg << RESET_COLOR << std::endl;
+        }
+        writeToFile("FATAL", msg);
+    }
+}
+
+// ---------- ERROR ----------
+void logOutputErrorConsole(const char *msg)
+{
+    logOutputErrorConsole(std::string(msg));
 }
 
 void logOutputErrorConsole(const std::string &msg)
 {
-    if (LogEnbale && LogLevelNumber <= 3)
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_ERROR)
     {
-        // 构建统一的消息字符串
         std::string outputMsg = "[" + getCurrentTime() + "] [ERROR] " + msg;
-
-        if (LogEnbaleConsole)
+        if (gConfigLogEnbaleConsole)
         {
-            std::cout << RED << outputMsg << RESET << std::endl;
+            std::cout << ERROR_COLOR << outputMsg << RESET_COLOR << std::endl;
         }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            fprintf(LogFile, "%s\n", outputMsg.c_str());
-            fflush(LogFile);
-            pthread_mutex_unlock(&LogMutex);
-        }
+        writeToFile("ERROR", msg);
     }
 }
 
+// ---------- WARN ----------
 void logOutputWarnConsole(const char *msg)
 {
-    if (LogEnbale && LogLevelNumber <= 2)
-    {
-        // 构建统一的消息字符串
-        std::string outputMsg = "[" + getCurrentTime() + "] [WARN] " + std::string(msg);
-
-        if (LogEnbaleConsole)
-        {
-            std::cout << YELLOW << outputMsg << RESET << std::endl;
-        }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            fprintf(LogFile, "%s\n", outputMsg.c_str());
-            fflush(LogFile);
-            pthread_mutex_unlock(&LogMutex);
-        }
-    }
+    logOutputWarnConsole(std::string(msg));
 }
 
 void logOutputWarnConsole(const std::string &msg)
 {
-    if (LogEnbale && LogLevelNumber <= 2)
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_WARN)
     {
-        // 构建统一的消息字符串
         std::string outputMsg = "[" + getCurrentTime() + "] [WARN] " + msg;
-
-        if (LogEnbaleConsole)
+        if (gConfigLogEnbaleConsole)
         {
-            std::cout << YELLOW << outputMsg << RESET << std::endl;
+            std::cout << WARN_COLOR << outputMsg << RESET_COLOR << std::endl;
         }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            fprintf(LogFile, "%s\n", outputMsg.c_str());
-            fflush(LogFile);
-            pthread_mutex_unlock(&LogMutex);
-        }
+        writeToFile("WARN", msg);
     }
 }
 
+// ---------- INFO ----------
 void logOutputInfoConsole(const char *msg)
 {
-    if (LogEnbale && LogLevelNumber <= 1)
-    {
-        // 构建统一的消息字符串
-        std::string outputMsg = "[" + getCurrentTime() + "] [INFO] " + std::string(msg);
-
-        if (LogEnbaleConsole)
-        {
-            std::cout << GREEN << outputMsg << RESET << std::endl;
-        }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            fprintf(LogFile, "%s\n", outputMsg.c_str());
-            fflush(LogFile);
-            pthread_mutex_unlock(&LogMutex);
-        }
-    }
+    logOutputInfoConsole(std::string(msg));
 }
 
 void logOutputInfoConsole(const std::string &msg)
 {
-    if (LogEnbale && LogLevelNumber <= 1)
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_INFO)
     {
-        // 构建统一的消息字符串
         std::string outputMsg = "[" + getCurrentTime() + "] [INFO] " + msg;
-
-        if (LogEnbaleConsole)
+        if (gConfigLogEnbaleConsole)
         {
-            std::cout << GREEN << outputMsg << RESET << std::endl;
+            std::cout << INFO_COLOR << outputMsg << RESET_COLOR << std::endl;
         }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            fprintf(LogFile, "%s\n", outputMsg.c_str());
-            fflush(LogFile);
-            pthread_mutex_unlock(&LogMutex);
-        }
+        writeToFile("INFO", msg);
     }
 }
 
+// ---------- DEBUG ----------
 void logOutputDebugConsole(const char *msg)
 {
-    if (LogEnbale && LogLevelNumber <= 0)
-    {
-        // 构建统一的消息字符串
-        std::string outputMsg = "[" + getCurrentTime() + "] [DEBUG] " + std::string(msg);
-
-        if (LogEnbaleConsole)
-        {
-            std::cout << BLUE << outputMsg << RESET << std::endl;
-        }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            fprintf(LogFile, "%s\n", outputMsg.c_str());
-            fflush(LogFile);
-            pthread_mutex_unlock(&LogMutex);
-        }
-    }
+    logOutputDebugConsole(std::string(msg));
 }
 
 void logOutputDebugConsole(const std::string &msg)
 {
-    if (LogEnbale && LogLevelNumber <= 0)
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_DEBUG)
     {
         std::string outputMsg = "[" + getCurrentTime() + "] [DEBUG] " + msg;
-
-        if (LogEnbaleConsole)
+        if (gConfigLogEnbaleConsole)
         {
-            std::cout << BLUE << outputMsg << RESET << std::endl;
+            std::cout << DEBUG_COLOR << outputMsg << RESET_COLOR << std::endl;
         }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            fprintf(LogFile, "%s\n", outputMsg.c_str());
-            fflush(LogFile);
-            pthread_mutex_unlock(&LogMutex);
-        }
+        writeToFile("DEBUG", msg);
     }
 }

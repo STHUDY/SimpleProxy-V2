@@ -1,0 +1,15 @@
+#ifndef __DEFINE_H__
+#define __DEFINE_H__
+
+#define CONNECT_USE_IO_NONE 0
+#define CONNECT_USE_IO_SELECT 1
+#define CONNECT_USE_IO_POLL 2
+#define CONNECT_USE_IO_EPOLL 3
+
+#define LOG_LEVEL_DEBUG 0
+#define LOG_LEVEL_INFO 1
+#define LOG_LEVEL_WARN 2
+#define LOG_LEVEL_ERROR 3
+#define LOG_LEVEL_FATAL 4
+
+#endif

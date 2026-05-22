@@ -17,7 +17,7 @@ extern "C"
         int port;                     // 端口号
     } SocketClientInfo;
 
-    typedef void (*SocketClientCallback)(int client_fd, SocketClientInfo *client_info);
+    typedef void (*SocketClientCallback)(int clientFd, SocketClientInfo *clientInfo);
 
     void initSocketServer();
 
@@ -25,7 +25,7 @@ extern "C"
 
     void closeSocketServer();
 
-    int connectSocketServer(SocketClientInfo *client_info);
+    int connectSocketServer(SocketClientInfo *clientInfo);
 
 #ifdef __cplusplus
 }

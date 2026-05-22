@@ -19,7 +19,7 @@ extern "C"
         SSL_CTX *ssl_ctx;             // TLS/SSL上下文
     } TlsClientInfo;
 
-    typedef void (*TlsClientCallback)(int client_fd, TlsClientInfo *client_info);
+    typedef void (*TlsClientCallback)(int clientFd, TlsClientInfo *clientInfo);
 
     void initTlsServer();
 
@@ -27,7 +27,7 @@ extern "C"
 
     void closeTlsServer();
 
-    int connectTlsServer(TlsClientInfo *client_info, const char *sni);
+    int connectTlsServer(TlsClientInfo *clientInfo, const char *sni);
 
     void closeTlsResource();
 

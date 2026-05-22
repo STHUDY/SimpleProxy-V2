@@ -3,57 +3,64 @@
 
 #include "headfile.h"
 
-extern int ConnectTimeout;
-extern int PollingIntervalMs;
+extern int gConfigSocketIoUseMode;
+extern bool gConfigSocketNoBlockReadOrWrite;
+extern bool gConfigSocketNoBlockConnect;
+extern int gConfigSocketAcceptTimeoutMs;
+extern int gConfigSocketConnectTimeoutMs;
+extern int gConfigSocketPollingIntervalMs;
+extern int gConfigSocketReadOrWriteTimeoutMs;
 
-extern bool LogEnbale;
-extern bool LogEnbaleConsole;
-extern int LogLevelNumber;
-extern char *LogFilePathChar;
-extern pthread_mutex_t LogMutex;
-extern FILE *LogFile;
+extern bool gConfigTlsEnbale;
+extern int gConfigTlsSocketIoUseMode;
+extern int gConfigTlsSslIoUseMode;
+extern bool gConfigTlsUseThreadpoolSslConnect;
+extern bool gConfigTlsNoBlockReadOrWrite;
+extern bool gConfigTlsNoBlockConnect;
+extern int gConfigTlsAcceptTimeoutMs;
+extern int gConfigTlsConnectTimeoutMs;
+extern int gConfigTlsPollingIntervalMs;
+extern int gConfigTlsReadOrWriteTimeoutMs;
 
-extern int ThreadPoolMaxThreadNumber;
-extern int ThreadPoolMinThreadNumber;
-extern int ThreadPoolStepAddThreadNumber;
-extern int ThreadPoolClearThreadTimeMs;
-extern int ThreadPoolWaitTimeMs;
+extern bool gConfigLogEnbale;
+extern bool gConfigLogEnbaleConsole;
+extern bool gConfigLogEnbaleFile;
+extern int gConfigLogLevel;
+extern char *gConfigLogFileChar;
 
-extern char *serverHostChar;
-extern int serverPort;
+extern int gConfigThreadpoolMinWorkers;
+extern int gConfigThreadpoolMaxWorkers;
+extern int gConfigThreadpoolClearThreadTimeMs;
+extern int gConfigThreadpoolPollingIntervalMs;
+extern int gConfigThreadpoolStepAddWorkers;
 
-extern char *clientHostChar;
-extern int clientPort;
+extern char *gServerHostChar;
+extern int gServerPort;
+extern int gServerSocketMaxBacklog;
+extern int gServerSocketBufferSize;
+extern char *gServerTlsCertFileChar;
+extern char *gServerTlsKeyFileChar;
 
-extern int serverSocketBufferSize;
-extern int serverSocketMaxBacklog;
-
-extern int clientSocketBufferSize;
-
-extern bool TlsEnbale;
-extern bool TlsNoBlock;
-extern bool TlsNoBlockConnect;
-
-extern bool SocketNoBlockConnect;
-extern bool SocketEnableSync;
-
-extern char *tlsCertFileChar;
-extern char *tlsKeyFileChar;
-
-extern char *tlsClientHostNameChar;
-extern char *tlsClientSniChar;
-extern char *tlsServerCaFileChar;
+extern char *gClientHostChar;
+extern int gClientPort;
+extern int gClientSocketBufferSize;
+extern char *gClientTlsHostNameChar;
+extern char *gClientTlsSniChar;
+extern char *gClientTlsCertFileChar;
 
 // 运行时变量
-extern bool SocketServerRun;
-extern bool TlsServerRun;
+extern bool rgSocketInit;
+extern bool rgSocketServerRun;
+extern int rgSocketServerFd;
+extern struct sockaddr_in rgSocketServerAddr;
 
-extern int socketServerFd;
-extern struct sockaddr_in serverAddr;
+extern bool rgTlsInit;
+extern bool rgTlsServerRun;
+extern int rgSslAcceptTimeoutMs;
+extern int rgTlsSocketServerFd;
+extern struct sockaddr_in rgTlsServerAddr;
 
-extern bool tlsInit;
-extern int SslAcceptTimeoutMs;
-extern int tlsSocketServerFd;
-extern struct sockaddr_in tlsServerAddr;
+extern pthread_mutex_t rgLogWriteFileMutex;
+extern FILE *rgLogFileOpen;
 
 #endif

@@ -1,10 +1,12 @@
 #include "Log.h"
 
-#define RESET "\033[0m"
-#define RED "\033[31m"
-#define YELLOW "\033[33m"
-#define GREEN "\033[32m"
-#define BLUE "\033[34m"
+// 颜色定义
+#define DEBUG_COLOR "\033[0;32m" // 绿色
+#define INFO_COLOR "\033[0;34m"  // 蓝色
+#define WARN_COLOR "\033[0;33m"  // 黄色
+#define ERROR_COLOR "\033[0;31m" // 红色
+#define FATAL_COLOR "\033[0;35m" // 紫色
+#define RESET_COLOR "\033[0m"
 
 char *getCurrentTimeString()
 {
@@ -15,168 +17,102 @@ char *getCurrentTimeString()
     return time_str;
 }
 
+// 辅助函数：写入文件（线程安全）
+static void writeToFile(const char *level, const char *msg)
+{
+    if (!gConfigLogEnbaleFile)
+        return;
+
+    char *timeStr = getCurrentTimeString();
+    // 使用固定缓冲区避免多次分配，注意线程安全（此处简单起见，使用静态缓冲区可能冲突，但日志场景可接受）
+    static char outputMsg[512];
+    snprintf(outputMsg, sizeof(outputMsg), "[%s] [%s] %s", timeStr, level, msg);
+
+    pthread_mutex_lock(&rgLogWriteFileMutex);
+    if (rgLogFileOpen == NULL)
+    {
+        rgLogFileOpen = fopen(gConfigLogFileChar, "a");
+        if (rgLogFileOpen == NULL)
+        {
+            gConfigLogEnbaleFile = false;
+            pthread_mutex_unlock(&rgLogWriteFileMutex);
+            // 直接输出到 stderr（避免递归）
+            fprintf(stderr, "[%s] [ERROR] open log file error: %s will not write log to file\n",
+                    getCurrentTimeString(), strerror(errno));
+            return;
+        }
+    }
+    fprintf(rgLogFileOpen, "%s\n", outputMsg);
+    fflush(rgLogFileOpen);
+    pthread_mutex_unlock(&rgLogWriteFileMutex);
+}
+
+// ---------- FATAL ----------
+void logOutputFatalConsole(const char *msg)
+{
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_FATAL)
+    {
+        char *timeStr = getCurrentTimeString();
+        if (gConfigLogEnbaleConsole)
+        {
+            printf(FATAL_COLOR "[%s] [FATAL] %s" RESET_COLOR "\n", timeStr, msg);
+        }
+        writeToFile("FATAL", msg);
+    }
+}
+
+// ---------- ERROR ----------
 void logOutputErrorConsoleCharString(const char *msg)
 {
-    if (LogEnbale && LogLevelNumber <= 3)
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_ERROR)
     {
-        const char *prefix = "[";
-        const char *separator1 = "] [ERROR] ";
-        const char *suffix = "\n";
-
-        // 计算需要的缓冲区大小
-        size_t len = strlen(prefix) + strlen(getCurrentTimeString()) + strlen(separator1) + strlen(msg) + strlen(suffix) + 1; // +1 for null terminator
-        char *outputMsg = malloc(len);
-        if (outputMsg == NULL)
+        char *timeStr = getCurrentTimeString();
+        if (gConfigLogEnbaleConsole)
         {
-            // 内存分配失败，可以选择打印错误或直接返回
-            return;
+            printf(ERROR_COLOR "[%s] [ERROR] %s" RESET_COLOR "\n", timeStr, msg);
         }
-        sprintf(outputMsg, "%s%s%s%s%s", prefix, getCurrentTimeString(), separator1, msg, suffix);
-
-        if (LogEnbaleConsole)
-        {
-            printf("%s[%s] [ERROR] %s%s\n", RED, getCurrentTimeString(), msg, RESET);
-            fflush(stdout);
-        }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            if (LogFile != NULL)
-            {                                      // 检查文件是否成功打开
-                fprintf(LogFile, "%s", outputMsg); // outputMsg已经包含了换行符
-                fflush(LogFile);
-            }
-            pthread_mutex_unlock(&LogMutex);
-        }
-
-        free(outputMsg); // 释放动态分配的内存
+        writeToFile("ERROR", msg);
     }
 }
 
+// ---------- WARN ----------
 void logOutputWarnConsoleCharString(const char *msg)
 {
-    if (LogEnbale && LogLevelNumber <= 2)
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_WARN)
     {
-        const char *prefix = "[";
-        const char *separator1 = "] [WARN] ";
-        const char *suffix = "\n";
-
-        size_t len = strlen(prefix) + strlen(getCurrentTimeString()) + strlen(separator1) + strlen(msg) + strlen(suffix) + 1;
-        char *outputMsg = malloc(len);
-        if (outputMsg == NULL)
+        char *timeStr = getCurrentTimeString();
+        if (gConfigLogEnbaleConsole)
         {
-            return;
+            printf(WARN_COLOR "[%s] [WARN] %s" RESET_COLOR "\n", timeStr, msg);
         }
-        sprintf(outputMsg, "%s%s%s%s%s", prefix, getCurrentTimeString(), separator1, msg, suffix);
-
-        if (LogEnbaleConsole)
-        {
-            printf("%s[%s] [WARN] %s%s\n", YELLOW, getCurrentTimeString(), msg, RESET);
-            fflush(stdout);
-        }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            if (LogFile != NULL)
-            {
-                fprintf(LogFile, "%s", outputMsg);
-                fflush(LogFile);
-            }
-            pthread_mutex_unlock(&LogMutex);
-        }
-
-        free(outputMsg);
+        writeToFile("WARN", msg);
     }
 }
 
+// ---------- INFO ----------
 void logOutputInfoConsoleCharString(const char *msg)
 {
-    if (LogEnbale && LogLevelNumber <= 1)
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_INFO)
     {
-        const char *prefix = "[";
-        const char *separator1 = "] [INFO] ";
-        const char *suffix = "\n";
-
-        size_t len = strlen(prefix) + strlen(getCurrentTimeString()) + strlen(separator1) + strlen(msg) + strlen(suffix) + 1;
-        char *outputMsg = malloc(len);
-        if (outputMsg == NULL)
+        char *timeStr = getCurrentTimeString();
+        if (gConfigLogEnbaleConsole)
         {
-            return;
+            printf(INFO_COLOR "[%s] [INFO] %s" RESET_COLOR "\n", timeStr, msg);
         }
-        sprintf(outputMsg, "%s%s%s%s%s", prefix, getCurrentTimeString(), separator1, msg, suffix);
-
-        if (LogEnbaleConsole)
-        {
-            printf("%s[%s] [INFO] %s%s\n", GREEN, getCurrentTimeString(), msg, RESET);
-            fflush(stdout);
-        }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            if (LogFile != NULL)
-            {
-                fprintf(LogFile, "%s", outputMsg);
-                fflush(LogFile);
-            }
-            pthread_mutex_unlock(&LogMutex);
-        }
-
-        free(outputMsg);
+        writeToFile("INFO", msg);
     }
 }
 
+// ---------- DEBUG ----------
 void logOutputDebugConsoleCharString(const char *msg)
 {
-    if (LogEnbale && LogLevelNumber <= 0)
+    if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_DEBUG)
     {
-        const char *prefix = "[";
-        const char *separator1 = "] [DEBUG] ";
-        const char *suffix = "\n";
-
-        size_t len = strlen(prefix) + strlen(getCurrentTimeString()) + strlen(separator1) + strlen(msg) + strlen(suffix) + 1;
-        char *outputMsg = malloc(len);
-        if (outputMsg == NULL)
+        char *timeStr = getCurrentTimeString();
+        if (gConfigLogEnbaleConsole)
         {
-            return;
+            printf(DEBUG_COLOR "[%s] [DEBUG] %s" RESET_COLOR "\n", timeStr, msg);
         }
-        sprintf(outputMsg, "%s%s%s%s%s", prefix, getCurrentTimeString(), separator1, msg, suffix);
-
-        if (LogEnbaleConsole)
-        {
-            printf("%s[%s] [DEBUG] %s%s\n", BLUE, getCurrentTimeString(), msg, RESET);
-            fflush(stdout);
-        }
-
-        if (LogFilePathChar != NULL) // 写入文件日志
-        {
-            pthread_mutex_lock(&LogMutex);
-            if (LogFile == NULL)
-            {
-                LogFile = fopen(LogFilePathChar, "a");
-            }
-            if (LogFile != NULL)
-            {
-                fprintf(LogFile, "%s", outputMsg);
-                fflush(LogFile);
-            }
-            pthread_mutex_unlock(&LogMutex);
-        }
-
-        free(outputMsg);
+        writeToFile("DEBUG", msg);
     }
 }

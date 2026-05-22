@@ -17,9 +17,11 @@
 #include <openssl/err.h>
 #include <netdb.h>
 #include <sys/epoll.h>
+#include <sys/resource.h> 
 //=================C++库==================
 #ifdef __cplusplus
 #include <iostream>
+#include <string>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -40,6 +42,7 @@
 #include "nTls.h"
 #include "config.h"
 #include "Log.h"
+#include "define.h"
 //================用户C++库=================
 #ifdef __cplusplus
 #include "ThreadpoolAutoCtrlByTime.hpp"

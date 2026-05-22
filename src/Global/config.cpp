@@ -1,22 +1,18 @@
 #include "config.hpp"
 
-std::string LogLevel;
-std::string LogFilePath;
+std::string gConfigLogFilePathString;
 
-std::string serverHost;
-std::string clientHost;
+std::string gServerHostString;
+std::string gServerTlsCertFileString;
+std::string gServerTlsKeyFileString;
+std::vector<std::string> gServerConnectAllowIpsList;
+std::vector<std::string> gServerConnectBanIpsList;
 
-ThreadpoolAutoCtrlByTime threadPool;
+std::string gClientHostString;
 
-std::vector<std::string> allowIpList;
-std::vector<std::string> banIpList;
+std::string gClientHostNameString;
+std::string gClientSniString;
+std::string gServerCertFileString;
 
-// std::unordered_set<int> ActiveSocketList;
-// std::mutex ActiveSocketsListMutex;
-
-std::string tlsCertFile;
-std::string tlsKeyFile;
-
-std::string tlsClientHostName;
-std::string tlsClientSni;
-std::string tlsServerCaFile;
+// 运行时变量
+ThreadpoolAutoCtrlByTime rgThreadPool;

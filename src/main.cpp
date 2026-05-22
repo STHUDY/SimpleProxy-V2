@@ -1,12 +1,55 @@
 #include "headfile.h"
-#include <sys/resource.h> // 添加rlimit相关的头文件
 
 bool SigintFlag = false;
-
 void SigintHandler(int sig)
 {
     SigintFlag = true;
     std::cout << " Ctrl+C pressed: wait close" << std::endl;
+}
+
+int chooseConnectUseIoMode(std::string connectUseIoModeString)
+{
+    if (connectUseIoModeString == "none")
+    {
+        return CONNECT_USE_IO_NONE;
+    }
+    else if (connectUseIoModeString == "select")
+    {
+        return CONNECT_USE_IO_SELECT;
+    }
+    else if (connectUseIoModeString == "poll")
+    {
+        return CONNECT_USE_IO_POLL;
+    }
+    else if (connectUseIoModeString == "epoll")
+    {
+        return CONNECT_USE_IO_EPOLL;
+    }
+    return CONNECT_USE_IO_NONE;
+}
+
+int chooseLogLevel(std::string logLevelString)
+{
+    if (logLevelString == "debug")
+    {
+        return LOG_LEVEL_DEBUG;
+    }
+    else if (logLevelString == "info")
+    {
+        return LOG_LEVEL_INFO;
+    }
+    else if (logLevelString == "warn")
+    {
+        return LOG_LEVEL_WARN;
+    }
+    else if (logLevelString == "error")
+    {
+        return LOG_LEVEL_ERROR;
+    }
+    else if (logLevelString == "fatal")
+    {
+        return LOG_LEVEL_FATAL;
+    }
 }
 
 // 设置文件描述符限制
@@ -55,7 +98,6 @@ int main(int argc, char *argv[])
 
     try
     {
-
         std::string configFile = "./config.yml";
 
         if (argc > 1) // 至少有一个额外参数
@@ -90,103 +132,119 @@ int main(int argc, char *argv[])
         }
         YAML::Node config = YAML::LoadFile(configFile);
 
-        ConnectTimeout = config["config"]["timeout"].as<int>();
-        PollingIntervalMs = config["config"]["pollingIntervalMs"].as<int>();
+        gConfigSocketIoUseMode = chooseConnectUseIoMode(config["config"]["socket"]["ioUseMode"].as<std::string>("none"));
+        gConfigSocketNoBlockReadOrWrite = config["config"]["socket"]["noBlockReadOrWrite"].as<bool>(false);
+        gConfigSocketNoBlockConnect = config["config"]["socket"]["noBlockConnect"].as<bool>(false);
+        gConfigSocketAcceptTimeoutMs = config["config"]["socket"]["acceptTimeoutMs"].as<int>(5000);
+        gConfigSocketConnectTimeoutMs = config["config"]["socket"]["connectTimeoutMs"].as<int>(-1);
+        gConfigSocketPollingIntervalMs = config["config"]["socket"]["pollingIntervalMs"].as<int>(5000);
+        gConfigSocketReadOrWriteTimeoutMs = config["config"]["socket"]["readOrWriteTimeoutMs"].as<int>(5000);
 
-        LogEnbale = config["config"]["log"]["enable"].as<bool>();
-        LogEnbaleConsole = config["config"]["log"]["console"].as<bool>();
-        LogLevel = config["config"]["log"]["level"].as<std::string>();
-        if (LogLevel == "debug")
+        gConfigTlsEnbale = config["config"]["tls"]["enable"].as<bool>(false);
+        if (gConfigTlsEnbale)
         {
-            LogLevelNumber = 0;
-        }
-        else if (LogLevel == "info")
-        {
-            LogLevelNumber = 1;
-        }
-        else if (LogLevel == "warn")
-        {
-            LogLevelNumber = 2;
-        }
-        else if (LogLevel == "error")
-        {
-            LogLevelNumber = 3;
+            gConfigTlsSocketIoUseMode = chooseConnectUseIoMode(config["config"]["tls"]["socketIoUseMode"].as<std::string>("none"));
+            gConfigTlsSslIoUseMode = chooseConnectUseIoMode(config["config"]["tls"]["sslIoUseMode"].as<std::string>("none"));
+            gConfigTlsUseThreadpoolSslConnect = config["config"]["tls"]["useThreadpoolSslAccept"].as<bool>(false);
+            gConfigTlsNoBlockReadOrWrite = config["config"]["tls"]["noBlockReadOrWrite"].as<bool>(false);
+            gConfigTlsNoBlockConnect = config["config"]["tls"]["noBlockConnect"].as<bool>(false);
+            gConfigTlsAcceptTimeoutMs = config["config"]["tls"]["acceptTimeoutMs"].as<int>(5000);
+            gConfigTlsConnectTimeoutMs = config["config"]["tls"]["connectTimeoutMs"].as<int>(-1);
+            gConfigTlsPollingIntervalMs = config["config"]["tls"]["pollingIntervalMs"].as<int>(1000);
+            gConfigTlsReadOrWriteTimeoutMs = config["config"]["tls"]["readOrWriteTimeoutMs"].as<int>(5000);
         }
 
-        std::string logFilePathStr = config["config"]["log"]["filePath"].as<std::string>();
-        if (logFilePathStr.empty())
+        gConfigLogEnbale = config["config"]["log"]["enable"].as<bool>(true);
+        if (gConfigLogEnbale)
         {
-            LogFilePathChar = NULL;
+            gConfigLogEnbaleConsole = config["config"]["log"]["console"].as<bool>(true);
+            gConfigLogLevel = chooseLogLevel(config["config"]["log"]["level"].as<std::string>("debug"));
+            gConfigLogEnbaleFile = config["config"]["log"]["file"].as<bool>(false);
+            if (gConfigLogEnbaleFile)
+            {
+                gConfigLogFilePathString = config["config"]["log"]["filePath"].as<std::string>("");
+                if (gConfigLogFilePathString != "")
+                {
+                    std::filesystem::path checkLogPath(gConfigLogFilePathString);
+                    if (std::filesystem::exists(checkLogPath) ||
+                        std::filesystem::exists(checkLogPath.parent_path()))
+                    {
+                        gConfigLogFileChar = const_cast<char *>(gConfigLogFilePathString.c_str());
+                        logOutputInfoConsole("log output file path: " + gConfigLogFilePathString);
+                    }
+                    else
+                    {
+                        gConfigLogEnbaleFile = false;
+                        logOutputWarnConsole("log output file path error: " + gConfigLogFilePathString + " not exists or parent path not exists so will not output log file");
+                    }
+                }
+                else
+                {
+                    logOutputWarnConsole("log file path is empty so log will not output to file");
+                }
+            }
+        }
+
+        gConfigThreadpoolMinWorkers = config["config"]["threadpool"]["minWokers"].as<int>(5);
+        gConfigThreadpoolMaxWorkers = config["config"]["threadpool"]["maxWokers"].as<int>(10);
+        gConfigThreadpoolClearThreadTimeMs = config["config"]["threadpool"]["clearThreadTimeMs"].as<int>(10000);
+        gConfigThreadpoolPollingIntervalMs = config["config"]["threadpool"]["pollingIntervalMs"].as<int>(1000);
+        gConfigThreadpoolStepAddWorkers = config["config"]["threadpool"]["stepAddThreadNumber"].as<int>(1);
+
+        logOutputInfoConsole("load config success to filepath : " + configFile);
+
+        gServerHostString = config["server"]["host"].as<std::string>("");
+        gServerPort = config["server"]["port"].as<int>(0);
+        if (gServerHostString == "")
+        {
+            logOutputFatalConsole("server host is empty");
+            return EXIT_FAILURE;
+        }
+        else if (gServerPort <= 0)
+        {
+            logOutputFatalConsole("server port is empty");
+            return EXIT_FAILURE;
         }
         else
         {
-            std::filesystem::path logPath(logFilePathStr);
-            if (std::filesystem::exists(logPath) ||
-                std::filesystem::exists(logPath.parent_path()))
-            {
+            logOutputInfoConsole("server host: " + gServerHostString + " port: " + std::to_string(gServerPort));
+            gServerHostChar = const_cast<char *>(gServerHostString.c_str());
+        }
+        gServerSocketMaxBacklog = config["server"]["socket"]["maxBacklog"].as<int>(128);
+        gServerSocketBufferSize = config["server"]["socket"]["bufferSize"].as<int>(8192);
 
-                LogFilePath = logFilePathStr;                              // 存储原始 string
-                LogFilePathChar = const_cast<char *>(LogFilePath.c_str()); // 转换为 char*
+        gServerTlsCertFileString = config["server"]["tls"]["cert"].as<std::string>("");
+        if (gServerTlsCertFileString == "")
+        {
+            logOutputErrorConsole("server.tls.cert is empty");
+        }
+        else
+        {
+            std::filesystem::path checkCertPath(gServerTlsCertFileString);
+            if (!std::filesystem::exists(checkCertPath))
+            {
+                logOutputErrorConsole("server.tls.cert file not exists");
+                gServerTlsCertFileString = "";
             }
             else
             {
-                logOutputWarnConsole("[WARN] Log file path or its parent directory does not exist");
-                LogFilePath = "";
-                LogFilePathChar = NULL;
+                gServerTlsCertFileChar = const_cast<char *>(gServerTlsCertFileString.c_str());
             }
         }
-
-        ThreadPoolMaxThreadNumber = config["config"]["threadPool"]["maxWokers"].as<size_t>() + 5;
-        ThreadPoolMinThreadNumber = config["config"]["threadPool"]["minWokers"].as<size_t>() + 5;
-        ThreadPoolClearThreadTimeMs = config["config"]["threadPool"]["clearThreadTimeMs"].as<int>();
-        ThreadPoolWaitTimeMs = config["config"]["threadPool"]["waitTimeMs"].as<int>();
-        ThreadPoolStepAddThreadNumber = config["config"]["threadPool"]["stepAddThreadNumber"].as<int>();
-
-        logOutputInfoConsole("load config file success");
-
-        serverHost = config["server"]["host"].as<std::string>();
-        serverHostChar = (char *)serverHost.c_str();
-
-        serverPort = config["server"]["port"].as<int>();
-
-        clientHost = config["client"]["host"].as<std::string>();
-        clientHostChar = (char *)clientHost.c_str();
-
-        clientPort = config["client"]["port"].as<int>();
-
-        serverSocketBufferSize = config["server"]["socket"]["bufferSize"].as<int>();
-        serverSocketMaxBacklog = config["server"]["socket"]["maxBacklog"].as<int>();
-
-        TlsEnbale = config["config"]["tls"]["enable"].as<bool>();
-        TlsNoBlock = config["config"]["tls"]["noBlock"].as<bool>();
-        TlsNoBlockConnect = config["config"]["tls"]["noBlockConnect"].as<bool>();
-        SslAcceptTimeoutMs = config["config"]["tls"]["acceptTimeoutMs"].as<int>();
-
-
-        SocketEnableSync = config["config"]["socket"]["enableSync"].as<bool>();
-        SocketNoBlockConnect = config["config"]["socket"]["noBlockConnect"].as<bool>();
-
-        tlsCertFile = config["server"]["tls"]["cert"].as<std::string>();
-        tlsCertFileChar = (char *)tlsCertFile.c_str();
-        tlsKeyFile = config["server"]["tls"]["key"].as<std::string>();
-        tlsKeyFileChar = (char *)tlsKeyFile.c_str();
-
-        clientSocketBufferSize = config["client"]["socket"]["bufferSize"].as<int>();
-        tlsClientHostName = config["client"]["tls"]["hostname"].as<std::string>();
-        if (tlsClientHostName != "")
+        gServerTlsKeyFileString = config["server"]["tls"]["key"].as<std::string>("");
+        if (gServerTlsKeyFileString == "")
         {
-            tlsClientHostNameChar = (char *)tlsClientHostName.c_str();
-        }
-        tlsClientSni = config["client"]["tls"]["sni"].as<std::string>();
-        if (tlsClientSni != "")
-        {
-            tlsClientSniChar = (char *)tlsClientSni.c_str();
-        }
-
-        tlsServerCaFile = config["client"]["tls"]["caCert"].as<std::string>();
-        if (tlsServerCaFile != "")
-        {
-            tlsServerCaFileChar = (char *)tlsServerCaFile.c_str();
+            logOutputErrorConsole("server.tls.key is empty");
+            std::filesystem::path checkKeyPath(gServerTlsKeyFileString);
+            if (!std::filesystem::exists(checkKeyPath))
+            {
+                logOutputErrorConsole("server.tls.key file not exists");
+                gServerTlsKeyFileString = "";
+            }
+            else
+            {
+                gServerTlsKeyFileChar = const_cast<char *>(gServerTlsKeyFileString.c_str());
+            }
         }
 
         YAML::Node banList = config["server"]["connect"]["banIps"];
@@ -196,8 +254,12 @@ int main(int argc, char *argv[])
         {
             if (item.IsScalar())
             { // 检查是否为标量值
-                std::string value = item.as<std::string>();
-                banIpList.push_back(value);
+                std::string value = item.as<std::string>("");
+                if (value != "")
+                {
+                    gServerConnectBanIpsList.push_back(value);
+                    logOutputDebugConsole("Firewall: Ban IP added - " + value);
+                }
             }
         }
 
@@ -205,59 +267,101 @@ int main(int argc, char *argv[])
         {
             if (item.IsScalar())
             { // 检查是否为标量值
-                std::string value = item.as<std::string>();
-                allowIpList.push_back(value);
-                logOutputInfoConsole("Firewall: Allow IP added - " + value);
+                std::string value = item.as<std::string>("");
+                if (value != "")
+                {
+                    gServerConnectAllowIpsList.push_back(value);
+                    logOutputDebugConsole("Firewall: Allow IP added - " + value);
+                }
             }
         }
 
         // 记录防火墙配置摘要
-        if (!banIpList.empty() || !allowIpList.empty())
+        if (!gServerConnectBanIpsList.empty() || !gServerConnectAllowIpsList.empty())
         {
-            logOutputInfoConsole("Firewall configured - Banned IPs: " + std::to_string(banIpList.size()) +
-                                 ", Allowed IPs: " + std::to_string(allowIpList.size()));
+            logOutputInfoConsole("Firewall configured - Banned IPs: " + std::to_string(gServerConnectBanIpsList.size()) +
+                                 ", Allowed IPs: " + std::to_string(gServerConnectAllowIpsList.size()));
         }
         else
         {
             logOutputWarnConsole("Firewall disabled - all IPs are allowed");
+        }
+
+        gClientHostString = config["client"]["host"].as<std::string>("");
+        gClientPort = config["client"]["port"].as<int>(0);
+
+        if (gClientHostString == "")
+        {
+            logOutputFatalConsole("client host is empty");
+            return EXIT_FAILURE;
+        }
+        else if (gClientPort <= 0)
+        {
+            logOutputFatalConsole("client port is empty");
+            return EXIT_FAILURE;
+        }
+        else
+        {
+            logOutputInfoConsole("client host: " + gClientHostString + " port: " + std::to_string(gClientPort));
+            gClientHostChar = const_cast<char *>(gClientHostString.c_str());
+        }
+
+        gClientSocketBufferSize = config["client"]["socket"]["bufferSize"].as<int>(8192);
+
+        gClientHostNameString = config["client"]["tls"]["hostname"].as<std::string>("");
+        if (gClientHostNameString != "")
+        {
+            gClientHostNameString = const_cast<char *>(gClientHostNameString.c_str());
+        }
+
+        gClientSniString = config["client"]["tls"]["sni"].as<std::string>("");
+        if (gClientSniString != "")
+        {
+            gClientSniString = const_cast<char *>(gClientSniString.c_str());
+        }
+
+        gServerCertFileString = config["server"]["tls"]["cert"].as<std::string>("");
+        if (gServerCertFileString != "")
+        {
+            gServerCertFileString = const_cast<char *>(gServerCertFileString.c_str());
         }
     }
     catch (YAML::Exception &e)
     {
         std::string error = "Configuration error in config.yml: ";
         error.append(e.what());
-        logOutputErrorConsole(error);
+        logOutputFatalConsole(error);
         return EXIT_FAILURE;
     }
 
-    if (TlsNoBlock == false && TlsEnbale)
+    if (gConfigTlsEnbale)
     {
-        if (clientSocketBufferSize < 8192)
+        if (gClientSocketBufferSize < 8192)
         {
-            logOutputWarnConsole("Performance warning: In blocking TLS mode, clientSocketBufferSize (" + std::to_string(clientSocketBufferSize) + ") is smaller than recommended minimum (8192). Consider increasing it.");
+            logOutputWarnConsole("Performance warning: In blocking TLS mode, clientSocketBufferSize (" + std::to_string(gClientSocketBufferSize) + ") is smaller than recommended minimum (8192). Consider increasing it.");
         }
-        if (serverSocketBufferSize < 8192)
+        if (gServerSocketBufferSize < 8192)
         {
-            logOutputWarnConsole("Performance warning: In blocking TLS mode, serverSocketBufferSize (" + std::to_string(serverSocketBufferSize) + ") is smaller than recommended minimum (8192). Consider increasing it.");
+            logOutputWarnConsole("Performance warning: In blocking TLS mode, serverSocketBufferSize (" + std::to_string(gServerSocketBufferSize) + ") is smaller than recommended minimum (8192). Consider increasing it.");
         }
     }
 
-    logOutputInfoConsole("ThreadPool configured - Min: " + std::to_string(ThreadPoolMinThreadNumber) +
-                         ", Max: " + std::to_string(ThreadPoolMaxThreadNumber) +
-                         ", Clear interval: " + std::to_string(ThreadPoolClearThreadTimeMs) + "ms");
+    logOutputInfoConsole("ThreadPool configured - Min: " + std::to_string(gConfigThreadpoolMinWorkers) +
+                         ", Max: " + std::to_string(gConfigThreadpoolMaxWorkers) +
+                         ", Clear interval: " + std::to_string(gConfigThreadpoolClearThreadTimeMs) + "ms");
 
-    threadPool.setMinThreadNumber(ThreadPoolMinThreadNumber);
-    threadPool.setMaxThreadNumber(ThreadPoolMaxThreadNumber);
-    threadPool.setClearThreadTimeMs(ThreadPoolClearThreadTimeMs);
-    threadPool.setWaitTimeMs(ThreadPoolWaitTimeMs);
-    threadPool.setStepAddThreadNumber(ThreadPoolStepAddThreadNumber);
-    threadPool.openOutputError();
+    rgThreadPool.setMinThreadNumber(gConfigThreadpoolMinWorkers);
+    rgThreadPool.setMaxThreadNumber(gConfigThreadpoolMaxWorkers);
+    rgThreadPool.setClearThreadTimeMs(gConfigThreadpoolClearThreadTimeMs);
+    rgThreadPool.setWaitTimeMs(gConfigThreadpoolPollingIntervalMs);
+    rgThreadPool.setStepAddThreadNumber(gConfigThreadpoolStepAddWorkers);
+    rgThreadPool.openOutputError();
 
-    if (TlsEnbale)
+    if (gConfigTlsEnbale)
     {
         logOutputInfoConsole("Initializing TLS server mode...");
         initTlsServer();
-        if (tlsSocketServerFd < 0)
+        if (rgTlsSocketServerFd < 0)
         {
             logOutputErrorConsole("Failed to initialize TLS server socket");
             return EXIT_FAILURE;
@@ -267,24 +371,24 @@ int main(int argc, char *argv[])
     {
         logOutputInfoConsole("Initializing plain socket server mode...");
         initSocketServer();
-        if (socketServerFd < 0)
+        if (rgSocketServerFd < 0)
         {
             logOutputErrorConsole("Failed to initialize server socket");
             return EXIT_FAILURE;
         }
     }
 
-    threadPool.init();
+    rgThreadPool.init();
 
-    if (TlsEnbale)
+    if (gConfigTlsEnbale)
     {
-        threadPool.submitMission(tlsListenerCallback);
-        logOutputInfoConsole("TLS server started successfully on " + serverHost + ":" + std::to_string(serverPort));
+        rgThreadPool.submitMission(tlsListenerCallback);
+        logOutputInfoConsole("TLS server started successfully on " + gServerHostString + ":" + std::to_string(gServerPort));
     }
     else
     {
-        threadPool.submitMission(socketListenerCallback);
-        logOutputInfoConsole("Plain socket server started successfully on " + serverHost + ":" + std::to_string(serverPort));
+        rgThreadPool.submitMission(socketListenerCallback);
+        logOutputInfoConsole("Plain socket server started successfully on " + gServerHostString + ":" + std::to_string(gClientPort));
     }
 
     while (!SigintFlag)
@@ -301,24 +405,24 @@ int main(int argc, char *argv[])
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
-    if (TlsEnbale)
+    if (gConfigTlsEnbale)
     {
         closeTlsServer();
-        threadPool.waitMissionDone();
-        threadPool.shutdown();
+        rgThreadPool.waitMissionDone();
+        rgThreadPool.shutdown();
         closeTlsResource();
     }
     else
     {
         closeSocketServer();
-        threadPool.waitMissionDone();
-        threadPool.shutdown();
+        rgThreadPool.waitMissionDone();
+        rgThreadPool.shutdown();
     }
 
-    if (LogFile != NULL)
+    if (rgLogFileOpen != NULL)
     {
-        fclose(LogFile);
-        LogFile = NULL;
+        fclose(rgLogFileOpen);
+        rgLogFileOpen = NULL;
     }
 
     return EXIT_SUCCESS;

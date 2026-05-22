@@ -1,54 +1,61 @@
 #include "config.h"
 
-int ConnectTimeout = 60;
-int PollingIntervalMs = 10;
+int gConfigSocketIoUseMode = CONNECT_USE_IO_NONE;
+bool gConfigSocketNoBlockReadOrWrite = false;
+bool gConfigSocketNoBlockConnect = false;
+int gConfigSocketAcceptTimeoutMs = 5000;
+int gConfigSocketConnectTimeoutMs = 5000;
+int gConfigSocketPollingIntervalMs = 1000;
+int gConfigSocketReadOrWriteTimeoutMs = 5000;
 
-bool LogEnbale = false;
-bool LogEnbaleConsole = true;
-int LogLevelNumber = 0;
-char *LogFilePathChar = NULL;
-pthread_mutex_t LogMutex;
-FILE *LogFile = NULL;
+bool gConfigTlsEnbale = false;
+int gConfigTlsSocketIoUseMode = CONNECT_USE_IO_NONE;
+int gConfigTlsSslIoUseMode = CONNECT_USE_IO_NONE;
+bool gConfigTlsUseThreadpoolSslConnect = false;
+bool gConfigTlsNoBlockReadOrWrite = false;
+bool gConfigTlsNoBlockConnect = false;
+int gConfigTlsAcceptTimeoutMs = 5000;
+int gConfigTlsConnectTimeoutMs = 5000;
+int gConfigTlsPollingIntervalMs = 1000;
+int gConfigTlsReadOrWriteTimeoutMs = 5000;
 
-int ThreadPoolMaxThreadNumber = 10;
-int ThreadPoolMinThreadNumber = 100;
-int ThreadPoolStepAddThreadNumber = 10;
-int ThreadPoolClearThreadTimeMs = 10 * 60 * 1000;
-int ThreadPoolWaitTimeMs = 500;
+bool gConfigLogEnbale = true;
+bool gConfigLogEnbaleConsole = true;
+bool gConfigLogEnbaleFile = false;
+int gConfigLogLevel = LOG_LEVEL_DEBUG;
+char *gConfigLogFileChar = NULL;
 
-char *serverHostChar = NULL;
-int serverPort = 0;
+int gConfigThreadpoolMinWorkers = 5;
+int gConfigThreadpoolMaxWorkers = 10;
+int gConfigThreadpoolClearThreadTimeMs = 10000;
+int gConfigThreadpoolPollingIntervalMs = 1000;
+int gConfigThreadpoolStepAddWorkers = 1;
 
-char *clientHostChar = NULL;
-int clientPort = 0;
+char *gServerHostChar = NULL;
+int gServerPort = 0;
+int gServerSocketMaxBacklog = 5;
+int gServerSocketBufferSize = 1024;
+char *gServerTlsCertFileChar = NULL;
+char *gServerTlsKeyFileChar = NULL;
 
-int serverSocketBufferSize = 0;
-int serverSocketMaxBacklog = 0;
-
-int clientSocketBufferSize = 0;
-
-bool TlsEnbale = false;
-bool TlsNoBlock = false;
-bool TlsNoBlockConnect = false;
-
-bool SocketNoBlockConnect = false;
-bool SocketEnableSync = false;
-
-char *tlsCertFileChar = NULL;
-char *tlsKeyFileChar = NULL;
-
-char *tlsClientHostNameChar = NULL;
-char *tlsClientSniChar = NULL;
-char *tlsServerCaFileChar = NULL;
+char *gClientHostChar = NULL;
+int gClientPort = 0;
+int gClientSocketBufferSize = 1024;
+char *gClientTlsHostNameChar = NULL;
+char *gClientTlsSniChar = NULL;
+char *gClientTlsCertFileChar = NULL;
 
 // 运行时变量
-bool SocketServerRun = false;
-bool TlsServerRun = false;
+bool rgSocketInit = false;
+bool rgSocketServerRun = false;
+int rgSocketServerFd = -1;
+struct sockaddr_in rgSocketServerAddr;
 
-int socketServerFd = -1;
-struct sockaddr_in serverAddr;
+bool rgTlsInit = false;
+bool rgTlsServerRun = false;
+int rgSslAcceptTimeoutMs = -1;
+int rgTlsSocketServerFd = -1;
+struct sockaddr_in rgTlsServerAddr;
 
-bool tlsInit = false;
-int SslAcceptTimeoutMs = -1;
-int tlsSocketServerFd = -1;
-struct sockaddr_in tlsServerAddr;
+pthread_mutex_t rgLogWriteFileMutex;
+FILE *rgLogFileOpen = NULL;
