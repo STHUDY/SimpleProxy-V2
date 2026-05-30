@@ -1,8 +1,8 @@
 #include "Log.hpp"
 
 // ANSI颜色代码
-const std::string DEBUG_COLOR = "\033[0;32m"; // 绿色
-const std::string INFO_COLOR = "\033[0;34m";  // 蓝色
+const std::string DEBUG_COLOR = "\033[0;34m"; // 蓝色
+const std::string INFO_COLOR = "\033[0;32m";  // 绿色
 const std::string WARN_COLOR = "\033[0;33m";  // 黄色
 const std::string ERROR_COLOR = "\033[0;31m"; // 红色
 const std::string FATAL_COLOR = "\033[0;35m"; // 紫色

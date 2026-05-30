@@ -5,7 +5,7 @@ config:
     noBlockConnect: true
     acceptTimeoutMs: 5000
     connectTimeoutMs: 5000
-    pollingIntervalMs: 1000
+    pollingIntervalMs: 100
     readOrWriteTimeoutMs: 5000
   tls: 
     enable: false  # 如果要处理HTTPS/TLS流量，请设置为true，并确保cert和key文件存在
@@ -16,13 +16,13 @@ config:
     noBlockConnect: true
     acceptTimeoutMs: 5000
     connectTimeoutMs: 5000
-    pollingIntervalMs: 1000
+    pollingIntervalMs: 100
     readOrWriteTimeoutMs: 5000
   log:
     enable: true 
     console: true
-    file: true
-    level: debug
+    file: false
+    level: info
     filePath: "./proxy.log"
   threadPool:
     minWokers: 10

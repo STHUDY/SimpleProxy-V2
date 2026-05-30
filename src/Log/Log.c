@@ -1,8 +1,8 @@
 #include "Log.h"
 
 // 颜色定义
-#define DEBUG_COLOR "\033[0;32m" // 绿色
-#define INFO_COLOR "\033[0;34m"  // 蓝色
+#define DEBUG_COLOR "\033[0;34m" // 蓝色
+#define INFO_COLOR "\033[0;32m"  // 绿色
 #define WARN_COLOR "\033[0;33m"  // 黄色
 #define ERROR_COLOR "\033[0;31m" // 红色
 #define FATAL_COLOR "\033[0;35m" // 紫色

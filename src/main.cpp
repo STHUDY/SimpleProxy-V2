@@ -388,7 +388,7 @@ int main(int argc, char *argv[])
     else
     {
         rgThreadPool.submitMission(socketListenerCallback);
-        logOutputInfoConsole("Plain socket server started successfully on " + gServerHostString + ":" + std::to_string(gClientPort));
+        logOutputInfoConsole("Plain socket server started successfully on " + gServerHostString + ":" + std::to_string(gServerPort));
     }
 
     while (!SigintFlag)

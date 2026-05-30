@@ -10,13 +10,6 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
 
     rgSocketServerRun = true;
 
-    // 非阻塞模式下用于轮询间隔计时
-    struct timespec lastCheck, now;
-    if (gConfigSocketNoBlockConnect)
-    {
-        clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-    }
-
     while (rgSocketServerRun)
     {
         struct sockaddr_in clientAddr;
@@ -38,12 +31,6 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
             clientInfo.ip_str[INET_ADDRSTRLEN - 1] = '\0';
 
             callback(clientFd, &clientInfo);
-
-            // 非阻塞模式下，有活动则重置计时（避免连接刚处理完又立即休眠）
-            if (gConfigSocketNoBlockConnect)
-            {
-                clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-            }
             continue;
         }
 
@@ -52,19 +39,6 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
         {
             if (gConfigSocketNoBlockConnect)
             {
-                clock_gettime(CLOCK_MONOTONIC, &now);
-                long elapsedUs = (now.tv_sec - lastCheck.tv_sec) * 1000000L +
-                                 (now.tv_nsec - lastCheck.tv_nsec) / 1000L;
-                long intervalUs = gConfigSocketPollingIntervalMs * 1000L;
-                if (elapsedUs < intervalUs)
-                {
-                    usleep(intervalUs - elapsedUs);
-                }
-                clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-            }
-            else
-            {
-                // 阻塞模式下不应出现，若出现则短暂退让
                 usleep(gConfigSocketPollingIntervalMs * 1000);
             }
             continue;
@@ -89,7 +63,7 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
             snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s",
                      errno, strerror(errno));
             logOutputErrorConsoleCharString(errMsg);
-            usleep(10000); // 避免空转
+            usleep(gConfigSocketPollingIntervalMs * 1000);
             break;
         }
         }
@@ -112,6 +86,7 @@ void initSocketServer()
         logOutputErrorConsoleCharString("Init: socket server failed - server host is null or empty");
         return;
     }
+
     if (gServerPort <= 0 || gServerPort > 65535)
     {
         char err[128];
@@ -119,6 +94,7 @@ void initSocketServer()
         logOutputErrorConsoleCharString(err);
         return;
     }
+
     int backlog = gServerSocketMaxBacklog > 0 ? gServerSocketMaxBacklog : 5;
     if (backlog != gServerSocketMaxBacklog)
     {
@@ -271,7 +247,6 @@ void listenSocketServer(SocketClientCallback callback)
             close(rgSocketServerFd);
             return;
         }
-
         if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
         {
             perror("Listen: setsockopt SO_RCVTIMEO");
@@ -420,11 +395,6 @@ int connectSocketServer(SocketClientInfo *clientInfo)
             int timeoutMs = gConfigSocketConnectTimeoutMs;       // 可能为 -1（无限等待）或正数
             int pollIntervalMs = gConfigSocketPollingIntervalMs; // 保证 > 0
 
-            struct timespec start, now;
-            if (timeoutMs > 0)
-            {
-                clock_gettime(CLOCK_MONOTONIC, &start);
-            }
             bool connected = false;
 
             while (!connected)
@@ -449,17 +419,13 @@ int connectSocketServer(SocketClientInfo *clientInfo)
                     break;
                 }
 
+                timeoutMs -= pollIntervalMs;
+
                 // 超时检查（仅当 timeoutMs > 0 时）
-                if (timeoutMs > 0)
+                if (timeoutMs < 0)
                 {
-                    clock_gettime(CLOCK_MONOTONIC, &now);
-                    long elapsedMs = (now.tv_sec - start.tv_sec) * 1000 +
-                                     (now.tv_nsec - start.tv_nsec) / 1000000;
-                    if (elapsedMs >= timeoutMs)
-                    {
-                        logOutputErrorConsoleCharString("Connect: connection timeout");
-                        break;
-                    }
+                    logOutputErrorConsoleCharString("Connect: connection timeout");
+                    break;
                 }
 
                 usleep(pollIntervalMs * 1000);

@@ -38,52 +38,6 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
         return;
     }
 
-    // 在非阻塞模式下设置socket为非阻塞以进行快速检测
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags == -1)
-    {
-        logOutputErrorConsole("Failed to get socket flags for client " + clientAddr + " - " + strerror(errno));
-        shutdown(fd, SHUT_RDWR);
-        close(fd);
-        return;
-    }
-
-    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1)
-    {
-        logOutputErrorConsole("Failed to set socket to non-blocking for client " + clientAddr + " - " + strerror(errno));
-        shutdown(fd, SHUT_RDWR);
-        close(fd);
-        return;
-    }
-
-    char detect_buffer[1024];
-    ssize_t bytes_read = recv(fd, detect_buffer, sizeof(detect_buffer), MSG_PEEK);
-
-    // 恢复原始socket标志
-    if (fcntl(fd, F_SETFL, flags) == -1)
-    {
-        logOutputWarnConsole("Failed to restore socket flags for client " + clientAddr + " - " + strerror(errno));
-        // 继续处理，但记录警告
-    }
-
-    if (bytes_read == 0)
-    {
-        // 客户端立即关闭连接
-        logOutputDebugConsole("Client " + clientAddr + " closed connection immediately during handshake");
-        close(fd);
-        return;
-    }
-    else
-    {
-        if (errno != EAGAIN && errno != EWOULDBLOCK)
-        {
-            logOutputErrorConsole("Error reading from client socket " + clientAddr + " - " + strerror(errno));
-            close(fd);
-            return;
-        }
-        // 如果是EAGAIN/EWOULDBLOCK，说明没有数据可读，继续正常处理
-    }
-
     SocketClientInfo *aConnectInfo = new SocketClientInfo(*socketClientInfo);
     SocketClientInfo *bConnectInfo = new SocketClientInfo;
 
@@ -125,10 +79,12 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
     int aSocket = aConnectInfo->fd;
     int bSocket = bConnectInfo->fd;
     char *buffer = new char[bufferSize];
-    std::unique_lock<std::mutex> ulock(*mutex);
 
+    std::unique_lock<std::mutex> ulock(*mutex);
     if (shareInfo->init == false)
     {
+        logOutputInfoConsole("New connection established - Client: " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port) + " -> Backend: " +
+                             std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
         if (gConfigSocketNoBlockReadOrWrite)
         {
             int flags;
@@ -139,28 +95,36 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
             if (flags != -1)
                 fcntl(bSocket, F_SETFL, flags | O_NONBLOCK);
         }
-        else if (gConfigSocketReadOrWriteTimeoutMs > 0)
+        else
         {
-            struct timeval tv;
-            tv.tv_sec = gConfigSocketReadOrWriteTimeoutMs / 1000;
-            tv.tv_usec = (gConfigSocketReadOrWriteTimeoutMs % 1000) * 1000;
-            setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-            setsockopt(bSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            int flags;
+            flags = fcntl(aSocket, F_GETFL, 0);
+            if (flags != -1)
+                fcntl(aSocket, F_SETFL, flags & ~O_NONBLOCK);
+            flags = fcntl(bSocket, F_GETFL, 0);
+            if (flags != -1)
+                fcntl(bSocket, F_SETFL, flags & ~O_NONBLOCK);
+
+            if (gConfigSocketReadOrWriteTimeoutMs > 0)
+            {
+                struct timeval tv;
+                tv.tv_sec = gConfigSocketReadOrWriteTimeoutMs / 1000;
+                tv.tv_usec = (gConfigSocketReadOrWriteTimeoutMs % 1000) * 1000;
+                setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+                setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                setsockopt(bSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+                setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            }
         }
+        shareInfo->close = false;
         shareInfo->init = true;
     }
 
+    ulock.unlock();
+
     if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
-        ulock.unlock();
         bool isBreak = false;
-        struct timespec lastPoll, now;
-        if (gConfigSocketNoBlockReadOrWrite)
-        {
-            clock_gettime(CLOCK_MONOTONIC, &lastPoll);
-        }
         while (rgSocketServerRun)
         {
             if (shareInfo->close == true)
@@ -168,64 +132,80 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                 break;
             }
 
-            if (shareInfo->timeout > gConfigSocketReadOrWriteTimeoutMs)
+            if (gConfigSocketReadOrWriteTimeoutMs > 0 && shareInfo->timeout > gConfigSocketReadOrWriteTimeoutMs)
             {
                 break;
             }
 
+            logOutputDebugConsole(headText + "Waiting for data from " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
             ssize_t recvLen = recv(aSocket, buffer, bufferSize, 0);
             if (recvLen < 0)
             {
+                logOutputDebugConsole("recv error: " + std::string(strerror(errno)));
                 if (errno == EAGAIN || errno == EWOULDBLOCK)
                 {
-                    clock_gettime(CLOCK_MONOTONIC, &now);
-                    long elapsedUs = (now.tv_sec - lastPoll.tv_sec) * 1000000L +
-                                     (now.tv_nsec - lastPoll.tv_nsec) / 1000L;
-                    long intervalUs = gConfigSocketPollingIntervalMs * 1000L;
-
-                    shareInfo->timeout += (float)elapsedUs / 2000.0f;
-
-                    if (elapsedUs < intervalUs)
+                    if (gConfigSocketReadOrWriteTimeoutMs > 0)
                     {
-                        usleep(intervalUs - elapsedUs);
+                        if (gConfigSocketNoBlockReadOrWrite)
+                            shareInfo->timeout += gConfigSocketPollingIntervalMs;
+                        else
+                            shareInfo->timeout += gConfigSocketReadOrWriteTimeoutMs;
+                        usleep(gConfigSocketPollingIntervalMs * 1000);
                     }
-                    clock_gettime(CLOCK_MONOTONIC, &lastPoll);
+                    continue;
+                }
+                else if (errno == EINTR)
+                {
                     continue;
                 }
                 isBreak = true;
                 break;
             }
-            if (recvLen == 0)
+            else if (recvLen == 0)
             {
                 isBreak = true;
+                break;
             }
+            logOutputDebugConsole(headText + "Read " + std::to_string(recvLen) + " bytes from " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
             ssize_t sentTotal = 0;
+            shareInfo->timeout = 0;
             while (sentTotal < recvLen)
             {
-                ssize_t sentLen = send(aSocket, buffer + sentTotal, recvLen - sentTotal, 0);
+                if (gConfigSocketReadOrWriteTimeoutMs > 0 && shareInfo->timeout > gConfigSocketReadOrWriteTimeoutMs)
+                {
+                    break;
+                }
+                ssize_t sentLen = send(bSocket, buffer + sentTotal, recvLen - sentTotal, MSG_NOSIGNAL);
                 if (sentLen < 0)
                 {
                     if (errno == EAGAIN || errno == EWOULDBLOCK)
                     {
-                        clock_gettime(CLOCK_MONOTONIC, &now);
-                        long elapsedUs = (now.tv_sec - lastPoll.tv_sec) * 1000000L +
-                                         (now.tv_nsec - lastPoll.tv_nsec) / 1000L;
-                        long intervalUs = gConfigSocketPollingIntervalMs * 1000L;
-
-                        shareInfo->timeout += (float)elapsedUs / 2000.0f;
-
-                        if (elapsedUs < intervalUs)
+                        if (gConfigSocketReadOrWriteTimeoutMs > 0)
                         {
-                            usleep(intervalUs - elapsedUs);
+                            if (gConfigSocketNoBlockReadOrWrite)
+                                shareInfo->timeout += gConfigSocketPollingIntervalMs;
+                            else
+                                shareInfo->timeout += gConfigSocketReadOrWriteTimeoutMs;
+                            usleep(gConfigSocketPollingIntervalMs * 1000);
                         }
-                        clock_gettime(CLOCK_MONOTONIC, &lastPoll);
+                        continue;
+                    }
+                    else if (errno == EINTR)
+                    {
                         continue;
                     }
                     isBreak = true;
                     break;
                 }
+                else if (sentLen == 0)
+                {
+                    isBreak = true;
+                    break;
+                }
                 sentTotal += sentLen;
+                logOutputDebugConsole(headText + "Sent " + std::to_string(sentLen) + " bytes to " + std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
             }
+            shareInfo->timeout = 0;
 
             if (isBreak)
             {
@@ -252,8 +232,8 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
     }
     else
     {
-        ulock.unlock();
         shareInfo->close = true;
+        ulock.unlock();
     }
 }
 
