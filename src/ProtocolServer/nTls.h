@@ -19,6 +19,8 @@ extern "C"
         SSL_CTX *ssl_ctx;             // TLS/SSL上下文
     } TlsClientInfo;
 
+    typedef struct SocketClientInfo SocketClientInfo;
+
     typedef void (*TlsClientCallback)(int clientFd, TlsClientInfo *clientInfo);
     typedef void (*TlsSocketUpgradeCallback)(SocketClientInfo *clientInfo, TlsClientCallback tlsCallback);
 

@@ -27,6 +27,7 @@ extern "C"
     void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *bConnectInfo, size_t bufferSize, CallbackShareInfo *shareInfo, std::string headText);
 
     typedef struct TlsClientInfo TlsClientInfo;
+    typedef void (*TlsClientCallback)(int clientFd, TlsClientInfo *clientInfo);
 
     void tlsSocketUpgradeCallback(SocketClientInfo *clientInfo, TlsClientCallback tlsCallback);
 
