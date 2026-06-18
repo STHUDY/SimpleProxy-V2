@@ -322,7 +322,7 @@ int main(int argc, char *argv[])
         gClientTlsHostNameString = config["client"]["tls"]["hostname"].as<std::string>("");
         if (gClientTlsHostNameString != "")
         {
-            gClientHostChar = const_cast<char *>(gClientTlsHostNameString.c_str());
+            gClientTlsHostNameChar = const_cast<char *>(gClientTlsHostNameString.c_str());
         }
 
         gClientTlsSniString = config["client"]["tls"]["sni"].as<std::string>("");
