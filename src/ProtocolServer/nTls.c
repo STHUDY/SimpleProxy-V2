@@ -1,5 +1,5 @@
 #include "nTls.h" // 根据实际情况包含头文件
-static SSL_CTX *createContext(bool isServer)
+SSL_CTX *createContext(bool isServer)
 {
     const SSL_METHOD *method;
     SSL_CTX *ctx = NULL;
@@ -19,7 +19,7 @@ static SSL_CTX *createContext(bool isServer)
     return ctx;
 }
 
-static bool configureServerContext(SSL_CTX *ctx)
+bool configureServerContext(SSL_CTX *ctx)
 {
     if (SSL_CTX_use_certificate_chain_file(ctx, gServerTlsCertFileChar) <= 0)
     {
@@ -37,7 +37,7 @@ static bool configureServerContext(SSL_CTX *ctx)
     return true;
 }
 
-static bool configureClientContext(SSL_CTX *ctx)
+bool configureClientContext(SSL_CTX *ctx)
 {
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
 
@@ -48,157 +48,15 @@ static bool configureClientContext(SSL_CTX *ctx)
     return true;
 }
 
-static void acceptTlsConnectIoNone(int clientFd, SocketClientInfo *clientInfo, TlsClientCallback callback)
+static void listenSocketConnectIoNone(TlsSocketUpgradeCallback socketUpgradeTlsCallback, TlsClientCallback tlsCallback)
 {
-    SSL_CTX *ctx = createContext(true);
-
-    if (ctx == NULL)
+    if (socketUpgradeTlsCallback == NULL)
     {
-        logOutputErrorConsoleCharString("Listen tls server have a mistake: create context error");
-        close(clientFd);
-    }
-
-    if (configureServerContext(ctx) == false)
-    {
-        logOutputErrorConsoleCharString("Listen tls server have a mistake: configure server context error");
-        SSL_CTX_free(ctx);
-        close(clientFd);
-    }
-
-    SSL *ssl = SSL_new(ctx);
-    if (ssl == NULL)
-    {
-        logOutputErrorConsoleCharString("Listen tls server have a mistake: SSL_new error");
-        SSL_CTX_free(ctx);
-        close(clientFd);
-    }
-
-    if (gConfigTlsNoBlockConnect)
-    {
-        SSL_set_mode(ssl, SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-    }
-
-    int sslAccept = 0;
-    int sslConnErr = 0;
-    float connectSpeadTimeMs = 0;
-
-    struct timespec lastCheck, now;
-    if (gConfigTlsNoBlockConnect)
-    {
-        clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-    }
-
-    while (rgTlsServerRun)
-    {
-        sslAccept = SSL_accept(ssl);
-        sslConnErr = SSL_ERROR_NONE;
-
-        if (sslAccept == 1)
-        {
-            TlsClientInfo tlsClientInfo = {0};
-            tlsClientInfo.fd = clientFd;
-            tlsClientInfo.ssl_ctx = ctx;
-            tlsClientInfo.ssl = ssl;
-            memcpy(&tlsClientInfo.addr, &clientInfo->addr, sizeof(clientInfo->addr_len));
-            tlsClientInfo.addr_len = sizeof(clientInfo->addr);
-            strncpy(tlsClientInfo.ip_str, clientInfo->ip_str, INET_ADDRSTRLEN);
-            tlsClientInfo.port = clientInfo->port;
-
-            if (callback)
-            {
-                callback(clientFd, &tlsClientInfo);
-            }
-            break;
-        }
-
-        sslConnErr = SSL_get_error(ssl, sslAccept);
-
-        if (sslConnErr == SSL_ERROR_WANT_READ || sslConnErr == SSL_ERROR_WANT_WRITE)
-        {
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            long elapsedUs = (now.tv_sec - lastCheck.tv_sec) * 1000000L +
-                             (now.tv_nsec - lastCheck.tv_nsec) / 1000L;
-            long intervalUs = gConfigTlsPollingIntervalMs * 1000L;
-
-            connectSpeadTimeMs += (float)elapsedUs / 1000.0f;
-
-            if (connectSpeadTimeMs > gConfigTlsAcceptTimeoutMs)
-            {
-                break;
-            }
-
-            if (elapsedUs < intervalUs)
-            {
-                usleep(intervalUs - elapsedUs);
-            }
-            clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-        }
-        else
-        {
-            break;
-        }
-    }
-
-    if (sslConnErr != SSL_ERROR_NONE)
-    {
-        unsigned long err = ERR_get_error();
-        char err_buf[256];
-        ERR_error_string_n(err, err_buf, sizeof(err_buf));
-        char error_string[512];
-        snprintf(error_string, sizeof(error_string), "SSL accept failed for client %s:%d - %s",
-                 clientInfo->ip_str, clientInfo->port, err_buf);
-        logOutputErrorConsoleCharString(error_string);
-
-        if (ssl)
-        {
-            SSL_free(ssl);
-            SSL_CTX_free(ctx);
-        }
-
-        if (clientFd >= 0)
-            close(clientFd);
-    }
-}
-
-static void upgradeSocketToTlsConnect(int clientFd, SocketClientInfo *clientInfo, TlsClientCallback callback)
-{
-    if (gConfigTlsNoBlockConnect)
-    {
-        int flags = fcntl(clientFd, F_GETFL, 0);
-        if (flags != -1)
-            fcntl(clientFd, F_SETFL, flags | O_NONBLOCK);
-    }
-    else if (gConfigTlsAcceptTimeoutMs > 0)
-    {
-        struct timeval tv;
-        tv.tv_sec = gConfigTlsAcceptTimeoutMs / 1000;
-        tv.tv_usec = (gConfigTlsAcceptTimeoutMs % 1000) * 1000;
-
-        setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    }
-
-    if (gConfigTlsSslIoUseMode == CONNECT_USE_IO_NONE)
-    {
-        acceptTlsConnectIoNone(clientFd, clientInfo, callback);
-    }
-}
-
-static void listenSocketConnectIoNone(TlsClientCallback callback)
-{
-    if (callback == NULL)
-    {
-        logOutputErrorConsoleCharString("Listen: callback is NULL");
+        logOutputErrorConsoleCharString("Listen: socketCallback is NULL");
         return;
     }
 
     rgTlsServerRun = true;
-
-    struct timespec lastCheck, now;
-    if (gConfigTlsNoBlockConnect)
-    {
-        clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-    }
 
     while (rgTlsServerRun)
     {
@@ -220,36 +78,16 @@ static void listenSocketConnectIoNone(TlsClientCallback callback)
             strncpy(clientInfo.ip_str, clientIp, INET_ADDRSTRLEN - 1);
             clientInfo.ip_str[INET_ADDRSTRLEN - 1] = '\0';
 
-            upgradeSocketToTlsConnect(clientFd, &clientInfo, callback);
+            // upgradeSocketToTlsConnect(clientFd, &clientInfo, socketCallback, tlsCallback);
 
-            // 非阻塞模式下，有活动则重置计时（避免连接刚处理完又立即休眠）
-            if (gConfigTlsNoBlockConnect)
-            {
-                clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-            }
+            socketUpgradeTlsCallback(&clientInfo, tlsCallback);
+
             continue;
         }
 
         // accept 失败处理
         if (errno == EWOULDBLOCK || errno == EAGAIN)
         {
-            if (gConfigTlsNoBlockConnect)
-            {
-                clock_gettime(CLOCK_MONOTONIC, &now);
-                long elapsedUs = (now.tv_sec - lastCheck.tv_sec) * 1000000L +
-                                 (now.tv_nsec - lastCheck.tv_nsec) / 1000L;
-                long intervalUs = gConfigTlsPollingIntervalMs * 1000L;
-                if (elapsedUs < intervalUs)
-                {
-                    usleep(intervalUs - elapsedUs);
-                }
-                clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-            }
-            else
-            {
-                // 阻塞模式下不应出现，若出现则短暂退让
-                usleep(gConfigTlsPollingIntervalMs * 1000);
-            }
             continue;
         }
 
@@ -261,7 +99,6 @@ static void listenSocketConnectIoNone(TlsClientCallback callback)
             break;
         case EMFILE:
             logOutputErrorConsoleCharString("Listen: too many open files, sleeping...");
-            usleep(gConfigTlsPollingIntervalMs * 1000);
             break;
         case ECONNABORTED:
             logOutputDebugConsoleCharString("Listen: connection aborted before accept");
@@ -272,7 +109,6 @@ static void listenSocketConnectIoNone(TlsClientCallback callback)
             snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s",
                      errno, strerror(errno));
             logOutputErrorConsoleCharString(errMsg);
-            usleep(10000); // 避免空转
             break;
         }
         }
@@ -310,44 +146,6 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo)
         return -1;
     }
     logOutputDebugConsoleCharString("Connect: socket() success");
-
-    if (gConfigTlsNoBlockConnect)
-    {
-        int flags = fcntl(sockFd, F_GETFL, 0);
-        if (flags == -1)
-        {
-            logOutputErrorConsoleCharString("Connect: fcntl(F_GETFL) failed");
-            close(sockFd);
-            return -1;
-        }
-        if (fcntl(sockFd, F_SETFL, flags | O_NONBLOCK) == -1)
-        {
-            logOutputErrorConsoleCharString("Connect: fcntl(F_SETFL) failed");
-            close(sockFd);
-            return -1;
-        }
-        logOutputDebugConsoleCharString("Connect: set non-blocking mode");
-    }
-    else if (gConfigTlsConnectTimeoutMs > 0)
-    {
-        // 阻塞模式下设置收发超时
-        struct timeval tv;
-        tv.tv_sec = gConfigTlsConnectTimeoutMs / 1000;
-        tv.tv_usec = (gConfigTlsConnectTimeoutMs % 1000) * 1000;
-        if (setsockopt(sockFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
-        {
-            perror("Connect: setsockopt SO_SNDTIMEO");
-            close(sockFd);
-            return -1;
-        }
-        if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
-        {
-            perror("Connect: setsockopt SO_RCVTIMEO");
-            close(sockFd);
-            return -1;
-        }
-        logOutputDebugConsoleCharString("Connect: set socket timeout");
-    }
 
     // 构建服务器地址
     struct sockaddr_in serverAddr;
@@ -391,71 +189,47 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo)
 
     if (gConfigTlsSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
-        int connectRet = connect(sockFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
-        if (connectRet == 0)
+        if (gConfigTlsConnectTimeoutMs > 0)
         {
-            logOutputDebugConsoleCharString("Connect: connection established immediately");
-        }
-        else if (errno == EINPROGRESS && gConfigTlsNoBlockConnect)
-        {
-            logOutputDebugConsoleCharString("Connect: connection in progress, start polling...");
-            // 直接使用配置变量，不提供默认值
-            int timeoutMs = gConfigTlsConnectTimeoutMs;          // 可能为 -1（无限等待）或正数
-            int pollIntervalMs = gConfigSocketPollingIntervalMs; // 保证 > 0
-
-            struct timespec start, now;
-            if (timeoutMs > 0)
+            // 阻塞模式下设置收发超时
+            struct timeval tv;
+            tv.tv_sec = gConfigTlsConnectTimeoutMs / 1000;
+            tv.tv_usec = (gConfigTlsConnectTimeoutMs % 1000) * 1000;
+            if (setsockopt(sockFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
             {
-                clock_gettime(CLOCK_MONOTONIC, &start);
-            }
-            bool connected = false;
-
-            while (!connected)
-            {
-                int soError = 0;
-                socklen_t len = sizeof(soError);
-                if (getsockopt(sockFd, SOL_SOCKET, SO_ERROR, &soError, &len) < 0)
-                {
-                    logOutputErrorConsoleCharString("Connect: getsockopt(SO_ERROR) failed");
-                    break;
-                }
-                if (soError == 0)
-                {
-                    connected = true;
-                    break;
-                }
-                else if (soError != 0 && soError != EINPROGRESS)
-                {
-                    char errBuf[256];
-                    snprintf(errBuf, sizeof(errBuf), "Connect: connection failed - %s", strerror(soError));
-                    logOutputErrorConsoleCharString(errBuf);
-                    break;
-                }
-
-                // 超时检查（仅当 timeoutMs > 0 时）
-                if (timeoutMs > 0)
-                {
-                    clock_gettime(CLOCK_MONOTONIC, &now);
-                    long elapsedMs = (now.tv_sec - start.tv_sec) * 1000 +
-                                     (now.tv_nsec - start.tv_nsec) / 1000000;
-                    if (elapsedMs >= timeoutMs)
-                    {
-                        logOutputErrorConsoleCharString("Connect: connection timeout");
-                        break;
-                    }
-                }
-
-                usleep(pollIntervalMs * 1000);
-            }
-
-            if (!connected)
-            {
+                perror("Connect: setsockopt SO_SNDTIMEO");
                 close(sockFd);
                 return -1;
             }
-            logOutputDebugConsoleCharString("Connect: non-blocking connection established via polling");
+            if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+            {
+                perror("Connect: setsockopt SO_RCVTIMEO");
+                close(sockFd);
+                return -1;
+            }
+            logOutputDebugConsoleCharString("Connect: set socket timeout");
         }
-        else
+
+        bool isBreak = false;
+        while (!isBreak)
+        {
+            int connectRet = connect(sockFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+            if (connectRet == 0)
+            {
+                logOutputDebugConsoleCharString("Connect: connection established immediately");
+                break;
+            }
+            else if (errno == EINPROGRESS)
+            {
+                continue;
+            }
+            else
+            {
+                isBreak = true;
+            }
+        }
+
+        if (isBreak)
         {
             char errMsg[256];
             snprintf(errMsg, sizeof(errMsg), "Connect: connect() failed - %s", strerror(errno));
@@ -504,6 +278,7 @@ static bool isValidTlsHost(const char *host)
 {
     return host != NULL && host[0] != '\0' && strcmp(host, "0.0.0.0") != 0 && strcmp(host, "localhost") != 0;
 }
+
 void initTlsServer()
 {
     if (gConfigTlsEnbale == false)
@@ -641,7 +416,7 @@ void initTlsServer()
     logOutputDebugConsoleCharString("Init: tls socket server initialized successfully");
 }
 
-void listenTlsServer(TlsClientCallback callback)
+void listenTlsServer(TlsSocketUpgradeCallback socketUpgradeTlsCallback, TlsClientCallback tlsCallback)
 {
     logOutputDebugConsoleCharString("Listen: start tls listen socket server");
 
@@ -651,52 +426,41 @@ void listenTlsServer(TlsClientCallback callback)
         return;
     }
 
-    if (callback == NULL)
+    if (socketUpgradeTlsCallback == NULL)
     {
-        logOutputErrorConsoleCharString("Listen tls server have a mistake: callback is null");
+        logOutputErrorConsoleCharString("Listen tls server have a mistake: socketCallback is null");
         return;
     }
 
-    // 设置非阻塞模式（如果需要）
-    if (gConfigTlsNoBlockConnect)
+    if (tlsCallback == NULL)
     {
-        int flags = fcntl(rgTlsSocketServerFd, F_GETFL, 0);
-        if (flags == -1)
-        {
-            logOutputErrorConsoleCharString("Listen: fcntl(F_GETFL) failed");
-            return;
-        }
-        if (fcntl(rgTlsSocketServerFd, F_SETFL, flags | O_NONBLOCK) == -1)
-        {
-            logOutputErrorConsoleCharString("Listen: fcntl(F_SETFL) failed");
-            return;
-        }
-        logOutputDebugConsoleCharString("Listen: set non-blocking mode");
-    }
-    else if (gConfigTlsAcceptTimeoutMs > 0)
-    {
-        struct timeval tv;
-        tv.tv_sec = gConfigTlsAcceptTimeoutMs / 1000;
-        tv.tv_usec = (gConfigTlsAcceptTimeoutMs % 1000) * 1000;
-
-        if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
-        {
-            perror("Listen: setsockopt SO_SNDTIMEO");
-            close(rgTlsSocketServerFd);
-            return;
-        }
-
-        if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
-        {
-            perror("Listen: setsockopt SO_RCVTIMEO");
-            close(rgTlsSocketServerFd);
-            return;
-        }
+        logOutputErrorConsoleCharString("Listen tls server have a mistake: tlsCallback is null");
+        return;
     }
 
     if (gConfigTlsSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
-        listenSocketConnectIoNone(callback);
+        if (gConfigTlsAcceptTimeoutMs > 0)
+        {
+            struct timeval tv;
+            tv.tv_sec = gConfigTlsAcceptTimeoutMs / 1000;
+            tv.tv_usec = (gConfigTlsAcceptTimeoutMs % 1000) * 1000;
+
+            if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
+            {
+                perror("Listen: setsockopt SO_SNDTIMEO");
+                close(rgTlsSocketServerFd);
+                return;
+            }
+
+            if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+            {
+                perror("Listen: setsockopt SO_RCVTIMEO");
+                close(rgTlsSocketServerFd);
+                return;
+            }
+        }
+        listenSocketConnectIoNone(socketUpgradeTlsCallback, tlsCallback);
     }
 }
 
@@ -767,13 +531,6 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni)
     {
         int sslConnect = 0;
         int sslConnErr = 0;
-        float connectSpeadTimeMs = 0;
-
-        struct timespec lastCheck, now;
-        if (gConfigTlsNoBlockConnect)
-        {
-            clock_gettime(CLOCK_MONOTONIC, &lastCheck);
-        }
 
         while (true)
         {
@@ -787,26 +544,33 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni)
 
             if (sslConnErr == SSL_ERROR_WANT_READ || sslConnErr == SSL_ERROR_WANT_WRITE)
             {
-                clock_gettime(CLOCK_MONOTONIC, &now);
-                long elapsedUs = (now.tv_sec - lastCheck.tv_sec) * 1000000L +
-                                 (now.tv_nsec - lastCheck.tv_nsec) / 1000L;
-                long intervalUs = gConfigTlsPollingIntervalMs * 1000L;
-
-                connectSpeadTimeMs += (float)elapsedUs / 1000.0f;
-
-                if (connectSpeadTimeMs > gConfigTlsConnectTimeoutMs)
+                char msg[256];
+                snprintf(msg, sizeof(msg), "SSL_accept select error: %s - %d", strerror(errno), errno);
+                logOutputErrorConsoleCharString(msg);
+                break;
+            }
+            else if (sslConnErr == SSL_ERROR_SYSCALL)
+            {
+                // 检查系统调用的errno是否代表超时
+                if (errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK)
                 {
-                    break;
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "SSL_accept syscall timeout: errno=%d", errno);
+                    logOutputErrorConsoleCharString(msg);
                 }
-
-                if (elapsedUs < intervalUs)
+                else
                 {
-                    usleep(intervalUs - elapsedUs);
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "SSL_accept syscall error: errno=%d", errno);
+                    logOutputErrorConsoleCharString(msg);
                 }
-                clock_gettime(CLOCK_MONOTONIC, &lastCheck);
+                break;
             }
             else
             {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "SSL_accept fatal SSL error: %d", sslConnErr);
+                logOutputErrorConsoleCharString(msg);
                 break;
             }
         }

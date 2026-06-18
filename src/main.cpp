@@ -147,7 +147,8 @@ int main(int argc, char *argv[])
         {
             gConfigTlsSocketIoUseMode = chooseConnectUseIoMode(config["config"]["tls"]["socketIoUseMode"].as<std::string>("none"));
             gConfigTlsSslIoUseMode = chooseConnectUseIoMode(config["config"]["tls"]["sslIoUseMode"].as<std::string>("none"));
-            gConfigTlsUseThreadpoolSslConnect = config["config"]["tls"]["useThreadpoolSslAccept"].as<bool>(false);
+            gConfigTlsUseThreadpoolAccept = config["config"]["tls"]["useThreadpoolAccept"].as<bool>(true);
+            gConfigTlsUseThreadpoolSslConnect = config["config"]["tls"]["useThreadpoolSslAccept"].as<bool>(true);
             gConfigTlsNoBlockReadOrWrite = config["config"]["tls"]["noBlockReadOrWrite"].as<bool>(false);
             gConfigTlsNoBlockConnect = config["config"]["tls"]["noBlockConnect"].as<bool>(false);
             gConfigTlsAcceptTimeoutMs = config["config"]["tls"]["acceptTimeoutMs"].as<int>(-1);

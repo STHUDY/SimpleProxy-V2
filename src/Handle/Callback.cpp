@@ -34,6 +34,9 @@ static void socketCreateProxyMission(SocketClientInfo *aConnectInfo, SocketClien
         logOutputErrorConsole("SECURITY: Access denied - IP '" + std::string(aConnectInfo->ip_str) + "' is blocked by firewall rules");
         shutdown(aConnectInfo->fd, SHUT_RDWR);
         close(aConnectInfo->fd);
+
+        delete aConnectInfo;
+        delete bConnectInfo;
         return;
     }
 
@@ -241,29 +244,139 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
     }
 }
 
-void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
+static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientCallback tlsCallback)
 {
-    std::string clientAddr = std::string(tlsClientInfo->ip_str) + ":" + std::to_string(tlsClientInfo->port);
+    int aSocket = aConnectInfo->fd;
 
-    if (!isIpAllowed(tlsClientInfo->ip_str))
+    if (gConfigTlsSslIoUseMode == CONNECT_USE_IO_NONE)
     {
-        logOutputErrorConsole("SECURITY: TLS Access denied - IP '" + std::string(tlsClientInfo->ip_str) + "' is blocked by firewall rules");
-        if (tlsClientInfo->ssl)
+        if (gConfigTlsAcceptTimeoutMs > 0)
         {
-            SSL_shutdown(tlsClientInfo->ssl);
-            SSL_free(tlsClientInfo->ssl);
-            SSL_CTX_free(tlsClientInfo->ssl_ctx);
+            struct timeval tv;
+            tv.tv_sec = gConfigTlsAcceptTimeoutMs / 1000;
+            tv.tv_usec = (gConfigTlsAcceptTimeoutMs % 1000) * 1000;
+
+            setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+            setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         }
-        if (tlsClientInfo->fd >= 0)
+
+        SSL_CTX *ctx = createContext(true);
+
+        if (configureServerContext(ctx) == false)
         {
-            close(tlsClientInfo->fd);
+            logOutputErrorConsole("Listen tls server have a mistake: configure server context error");
+            SSL_CTX_free(ctx);
+            close(aSocket);
+            delete aConnectInfo;
+            return;
         }
+
+        SSL *ssl = SSL_new(ctx);
+        if (ssl == NULL)
+        {
+            logOutputErrorConsole("Listen tls server have a mistake: SSL_new error");
+            SSL_CTX_free(ctx);
+            close(aSocket);
+            delete aConnectInfo;
+            return;
+        }
+
+        int sslAccept = 0;
+        int sslConnErr = 0;
+
+        while (rgTlsServerRun)
+        {
+            sslAccept = SSL_accept(ssl);
+            sslConnErr = SSL_ERROR_NONE;
+            if (sslAccept == 1)
+            {
+                TlsClientInfo tlsClientInfo = {0};
+                tlsClientInfo.fd = aSocket;
+                tlsClientInfo.ssl_ctx = ctx;
+                tlsClientInfo.ssl = ssl;
+                memcpy(&tlsClientInfo.addr, &aConnectInfo->addr, sizeof(aConnectInfo->addr_len));
+                tlsClientInfo.addr_len = sizeof(aConnectInfo->addr);
+                strncpy(tlsClientInfo.ip_str, aConnectInfo->ip_str, INET_ADDRSTRLEN);
+                tlsClientInfo.port = aConnectInfo->port;
+                tlsCallback(aSocket, &tlsClientInfo);
+                break;
+            }
+
+            sslConnErr = SSL_get_error(ssl, sslAccept);
+
+            if (sslConnErr == SSL_ERROR_WANT_READ || sslConnErr == SSL_ERROR_WANT_WRITE)
+            {
+                logOutputErrorConsole("SSL_accept select error: " + std::to_string(errno));
+                break;
+            }
+            else if (sslConnErr == SSL_ERROR_SYSCALL)
+            {
+                // 检查系统调用的errno是否代表超时
+                if (errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK)
+                {
+                    logOutputErrorConsole("SSL_accept syscall timeout: errno=" + std::to_string(errno));
+                }
+                else
+                {
+                    logOutputErrorConsole("SSL_accept syscall error: errno=" + std::to_string(errno));
+                }
+                break;
+            }
+            else
+            {
+                logOutputErrorConsole("SSL_accept fatal SSL error: " + std::to_string(sslConnErr));
+                break;
+            }
+        }
+
+        if (sslConnErr != SSL_ERROR_NONE)
+        {
+            // 获取详细错误字符串
+            char errBuf[256];
+            unsigned long err = ERR_get_error();
+            ERR_error_string_n(err, errBuf, sizeof(errBuf));
+
+            std::ostringstream oss;
+            oss << "SSL accept failed for client " << aConnectInfo->ip_str << ":" << aConnectInfo->port
+                << " - " << errBuf;
+            logOutputErrorConsole(oss.str());
+
+            if (ssl)
+            {
+                SSL_free(ssl);
+                SSL_CTX_free(ctx);
+            }
+
+            if (aConnectInfo >= 0)
+                close(aSocket);
+        }
+
+        delete aConnectInfo;
+    }
+}
+
+static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
+{
+    std::string clientAddr = std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port);
+
+    if (!isIpAllowed(aConnectInfo->ip_str))
+    {
+        logOutputErrorConsole("SECURITY: TLS Access denied - IP '" + std::string(aConnectInfo->ip_str) + "' is blocked by firewall rules");
+        if (aConnectInfo->ssl)
+        {
+            SSL_shutdown(aConnectInfo->ssl);
+            SSL_free(aConnectInfo->ssl);
+            SSL_CTX_free(aConnectInfo->ssl_ctx);
+        }
+        if (aConnectInfo->fd >= 0)
+        {
+            close(aConnectInfo->fd);
+        }
+
+        delete aConnectInfo;
+        delete bConnectInfo;
         return;
     }
-
-    // 必须复制TlsClientInfo
-    TlsClientInfo *aConnectInfo = new TlsClientInfo(*tlsClientInfo);
-    TlsClientInfo *bConnectInfo = new TlsClientInfo;
 
     std::string sniStr;
     const char *sni = NULL;
@@ -316,9 +429,39 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
     rgThreadPool.pushMission(tlsProxyWorker, aConnectInfo, bConnectInfo);
 }
 
+void tlsSocketUpgradeCallback(SocketClientInfo *clientInfo, TlsClientCallback tlsCallback)
+{
+    SocketClientInfo *aConnectInfo = new SocketClientInfo(*clientInfo);
+    if (gConfigTlsUseThreadpoolAccept)
+    {
+        rgThreadPool.pushMission(tlsSocketUpgradeTlsAccept, aConnectInfo, tlsCallback);
+    }
+    else
+    {
+        tlsSocketUpgradeTlsAccept(aConnectInfo, tlsCallback);
+    }
+}
+
+void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
+{
+
+    // 必须复制TlsClientInfo
+    TlsClientInfo *aConnectInfo = new TlsClientInfo(*tlsClientInfo);
+    TlsClientInfo *bConnectInfo = new TlsClientInfo;
+
+    if (gConfigTlsUseThreadpoolSslConnect)
+    {
+        rgThreadPool.pushMission(tlsCreateProxyMission, aConnectInfo, bConnectInfo);
+    }
+    else
+    {
+        tlsCreateProxyMission(aConnectInfo, bConnectInfo);
+    }
+}
+
 void tlsListenerCallback()
 {
-    listenTlsServer(tlsServerCallback);
+    listenTlsServer(tlsSocketUpgradeCallback, tlsServerCallback);
 }
 
 void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
@@ -374,27 +517,6 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
         logOutputInfoConsole("TLS proxy worker stopped");
     };
 
-    if (gConfigTlsNoBlockReadOrWrite)
-    {
-        int flags;
-        flags = fcntl(aSocket, F_GETFL, 0);
-        if (flags != -1)
-            fcntl(aSocket, F_SETFL, flags | O_NONBLOCK);
-        flags = fcntl(bSocket, F_GETFL, 0);
-        if (flags != -1)
-            fcntl(bSocket, F_SETFL, flags | O_NONBLOCK);
-    }
-    else if (gConfigTlsReadOrWriteTimeoutMs > 0)
-    {
-        struct timeval tv;
-        tv.tv_sec = gConfigTlsReadOrWriteTimeoutMs / 1000;
-        tv.tv_usec = (gConfigTlsReadOrWriteTimeoutMs % 1000) * 1000;
-        setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        setsockopt(bSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    }
-
     logOutputInfoConsole("TLS proxy worker started");
 
     if (SSL_is_init_finished(aSsl) == 0 || SSL_is_init_finished(bSsl) == 0)
@@ -404,6 +526,17 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
         return;
     }
     logOutputDebugConsole("TLS proxy started with verified handshake completion");
+
+    if (gConfigTlsReadOrWriteTimeoutMs > 0)
+    {
+        struct timeval tv;
+        tv.tv_sec = gConfigTlsReadOrWriteTimeoutMs / 1000;
+        tv.tv_usec = (gConfigTlsReadOrWriteTimeoutMs % 1000) * 1000;
+        setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(bSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    }
 
     epollFd = epoll_create1(EPOLL_CLOEXEC);
     if (epollFd == -1)

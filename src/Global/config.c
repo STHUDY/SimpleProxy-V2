@@ -12,6 +12,7 @@ int gConfigSocketReadOrWriteTimeoutMs = -1;
 bool gConfigTlsEnbale = false;
 int gConfigTlsSocketIoUseMode = CONNECT_USE_IO_NONE;
 int gConfigTlsSslIoUseMode = CONNECT_USE_IO_NONE;
+bool gConfigTlsUseThreadpoolAccept = true;
 bool gConfigTlsUseThreadpoolSslConnect = false;
 bool gConfigTlsNoBlockReadOrWrite = false;
 bool gConfigTlsNoBlockConnect = false;

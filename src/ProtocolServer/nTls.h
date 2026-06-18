@@ -20,10 +20,17 @@ extern "C"
     } TlsClientInfo;
 
     typedef void (*TlsClientCallback)(int clientFd, TlsClientInfo *clientInfo);
+    typedef void (*TlsSocketUpgradeCallback)(SocketClientInfo *clientInfo, TlsClientCallback tlsCallback);
+
+    SSL_CTX *createContext(bool isServer);
+
+    bool configureServerContext(SSL_CTX *ctx);
+
+    bool configureClientContext(SSL_CTX *ctx);
 
     void initTlsServer();
 
-    void listenTlsServer(TlsClientCallback callback);
+    void listenTlsServer(TlsSocketUpgradeCallback socketUpgradeTlsCallback, TlsClientCallback tlsCallback);
 
     void closeTlsServer();
 

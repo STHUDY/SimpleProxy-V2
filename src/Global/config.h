@@ -15,6 +15,7 @@ extern int gConfigSocketReadOrWriteTimeoutMs;
 extern bool gConfigTlsEnbale;
 extern int gConfigTlsSocketIoUseMode;
 extern int gConfigTlsSslIoUseMode;
+extern bool gConfigTlsUseThreadpoolAccept;
 extern bool gConfigTlsUseThreadpoolSslConnect;
 extern bool gConfigTlsNoBlockReadOrWrite;
 extern bool gConfigTlsNoBlockConnect;

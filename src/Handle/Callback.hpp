@@ -28,6 +28,8 @@ extern "C"
 
     typedef struct TlsClientInfo TlsClientInfo;
 
+    void tlsSocketUpgradeCallback(SocketClientInfo *clientInfo, TlsClientCallback tlsCallback);
+
     void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo);
 
     void tlsListenerCallback();
