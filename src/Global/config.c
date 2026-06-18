@@ -1,12 +1,13 @@
 #include "config.h"
 
 int gConfigSocketIoUseMode = CONNECT_USE_IO_NONE;
+bool gConfigSocketUseThreadpoolAccept = true;
 bool gConfigSocketNoBlockReadOrWrite = false;
 bool gConfigSocketNoBlockConnect = false;
-int gConfigSocketAcceptTimeoutMs = 5000;
-int gConfigSocketConnectTimeoutMs = 5000;
-int gConfigSocketPollingIntervalMs = 1000;
-int gConfigSocketReadOrWriteTimeoutMs = 5000;
+int gConfigSocketAcceptTimeoutMs = -1;
+int gConfigSocketConnectTimeoutMs = -1;
+int gConfigSocketPollingIntervalMs = 100;
+int gConfigSocketReadOrWriteTimeoutMs = -1;
 
 bool gConfigTlsEnbale = false;
 int gConfigTlsSocketIoUseMode = CONNECT_USE_IO_NONE;
@@ -14,10 +15,10 @@ int gConfigTlsSslIoUseMode = CONNECT_USE_IO_NONE;
 bool gConfigTlsUseThreadpoolSslConnect = false;
 bool gConfigTlsNoBlockReadOrWrite = false;
 bool gConfigTlsNoBlockConnect = false;
-int gConfigTlsAcceptTimeoutMs = 5000;
-int gConfigTlsConnectTimeoutMs = 5000;
-int gConfigTlsPollingIntervalMs = 1000;
-int gConfigTlsReadOrWriteTimeoutMs = 5000;
+int gConfigTlsAcceptTimeoutMs = -1;
+int gConfigTlsConnectTimeoutMs = -1;
+int gConfigTlsPollingIntervalMs = 100;
+int gConfigTlsReadOrWriteTimeoutMs = -1;
 
 bool gConfigLogEnbale = true;
 bool gConfigLogEnbaleConsole = true;

@@ -4,6 +4,7 @@
 #include "headfile.h"
 
 extern int gConfigSocketIoUseMode;
+extern bool gConfigSocketUseThreadpoolAccept;
 extern bool gConfigSocketNoBlockReadOrWrite;
 extern bool gConfigSocketNoBlockConnect;
 extern int gConfigSocketAcceptTimeoutMs;

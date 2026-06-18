@@ -50,6 +50,7 @@ int chooseLogLevel(std::string logLevelString)
     {
         return LOG_LEVEL_FATAL;
     }
+    return LOG_LEVEL_DEBUG;
 }
 
 // 设置文件描述符限制
@@ -133,12 +134,13 @@ int main(int argc, char *argv[])
         YAML::Node config = YAML::LoadFile(configFile);
 
         gConfigSocketIoUseMode = chooseConnectUseIoMode(config["config"]["socket"]["ioUseMode"].as<std::string>("none"));
+        gConfigSocketUseThreadpoolAccept = config["config"]["socket"]["useThreadpoolAccept"].as<bool>(true);
         gConfigSocketNoBlockReadOrWrite = config["config"]["socket"]["noBlockReadOrWrite"].as<bool>(false);
         gConfigSocketNoBlockConnect = config["config"]["socket"]["noBlockConnect"].as<bool>(false);
-        gConfigSocketAcceptTimeoutMs = config["config"]["socket"]["acceptTimeoutMs"].as<int>(5000);
+        gConfigSocketAcceptTimeoutMs = config["config"]["socket"]["acceptTimeoutMs"].as<int>(-1);
         gConfigSocketConnectTimeoutMs = config["config"]["socket"]["connectTimeoutMs"].as<int>(-1);
-        gConfigSocketPollingIntervalMs = config["config"]["socket"]["pollingIntervalMs"].as<int>(5000);
-        gConfigSocketReadOrWriteTimeoutMs = config["config"]["socket"]["readOrWriteTimeoutMs"].as<int>(5000);
+        gConfigSocketPollingIntervalMs = config["config"]["socket"]["pollingIntervalMs"].as<int>(500);
+        gConfigSocketReadOrWriteTimeoutMs = config["config"]["socket"]["readOrWriteTimeoutMs"].as<int>(-1);
 
         gConfigTlsEnbale = config["config"]["tls"]["enable"].as<bool>(false);
         if (gConfigTlsEnbale)
@@ -148,10 +150,10 @@ int main(int argc, char *argv[])
             gConfigTlsUseThreadpoolSslConnect = config["config"]["tls"]["useThreadpoolSslAccept"].as<bool>(false);
             gConfigTlsNoBlockReadOrWrite = config["config"]["tls"]["noBlockReadOrWrite"].as<bool>(false);
             gConfigTlsNoBlockConnect = config["config"]["tls"]["noBlockConnect"].as<bool>(false);
-            gConfigTlsAcceptTimeoutMs = config["config"]["tls"]["acceptTimeoutMs"].as<int>(5000);
+            gConfigTlsAcceptTimeoutMs = config["config"]["tls"]["acceptTimeoutMs"].as<int>(-1);
             gConfigTlsConnectTimeoutMs = config["config"]["tls"]["connectTimeoutMs"].as<int>(-1);
-            gConfigTlsPollingIntervalMs = config["config"]["tls"]["pollingIntervalMs"].as<int>(1000);
-            gConfigTlsReadOrWriteTimeoutMs = config["config"]["tls"]["readOrWriteTimeoutMs"].as<int>(5000);
+            gConfigTlsPollingIntervalMs = config["config"]["tls"]["pollingIntervalMs"].as<int>(100);
+            gConfigTlsReadOrWriteTimeoutMs = config["config"]["tls"]["readOrWriteTimeoutMs"].as<int>(-1);
         }
 
         gConfigLogEnbale = config["config"]["log"]["enable"].as<bool>(true);
@@ -186,9 +188,9 @@ int main(int argc, char *argv[])
         }
 
         gConfigThreadpoolMinWorkers = config["config"]["threadpool"]["minWokers"].as<int>(5);
-        gConfigThreadpoolMaxWorkers = config["config"]["threadpool"]["maxWokers"].as<int>(10);
+        gConfigThreadpoolMaxWorkers = config["config"]["threadpool"]["maxWokers"].as<int>(15);
         gConfigThreadpoolClearThreadTimeMs = config["config"]["threadpool"]["clearThreadTimeMs"].as<int>(10000);
-        gConfigThreadpoolPollingIntervalMs = config["config"]["threadpool"]["pollingIntervalMs"].as<int>(1000);
+        gConfigThreadpoolPollingIntervalMs = config["config"]["threadpool"]["pollingIntervalMs"].as<int>(500);
         gConfigThreadpoolStepAddWorkers = config["config"]["threadpool"]["stepAddThreadNumber"].as<int>(1);
 
         logOutputInfoConsole("load config success to filepath : " + configFile);
@@ -213,37 +215,40 @@ int main(int argc, char *argv[])
         gServerSocketMaxBacklog = config["server"]["socket"]["maxBacklog"].as<int>(128);
         gServerSocketBufferSize = config["server"]["socket"]["bufferSize"].as<int>(8192);
 
-        gServerTlsCertFileString = config["server"]["tls"]["cert"].as<std::string>("");
-        if (gServerTlsCertFileString == "")
+        if (gConfigTlsEnbale)
         {
-            logOutputErrorConsole("server.tls.cert is empty");
-        }
-        else
-        {
-            std::filesystem::path checkCertPath(gServerTlsCertFileString);
-            if (!std::filesystem::exists(checkCertPath))
+            gServerTlsCertFileString = config["server"]["tls"]["cert"].as<std::string>("");
+            if (gServerTlsCertFileString == "")
             {
-                logOutputErrorConsole("server.tls.cert file not exists");
-                gServerTlsCertFileString = "";
+                logOutputErrorConsole("server.tls.cert is empty");
             }
             else
             {
-                gServerTlsCertFileChar = const_cast<char *>(gServerTlsCertFileString.c_str());
+                std::filesystem::path checkCertPath(gServerTlsCertFileString);
+                if (!std::filesystem::exists(checkCertPath))
+                {
+                    logOutputErrorConsole("server.tls.cert file not exists");
+                    gServerTlsCertFileString = "";
+                }
+                else
+                {
+                    gServerTlsCertFileChar = const_cast<char *>(gServerTlsCertFileString.c_str());
+                }
             }
-        }
-        gServerTlsKeyFileString = config["server"]["tls"]["key"].as<std::string>("");
-        if (gServerTlsKeyFileString == "")
-        {
-            logOutputErrorConsole("server.tls.key is empty");
-            std::filesystem::path checkKeyPath(gServerTlsKeyFileString);
-            if (!std::filesystem::exists(checkKeyPath))
+            gServerTlsKeyFileString = config["server"]["tls"]["key"].as<std::string>("");
+            if (gServerTlsKeyFileString == "")
             {
-                logOutputErrorConsole("server.tls.key file not exists");
-                gServerTlsKeyFileString = "";
-            }
-            else
-            {
-                gServerTlsKeyFileChar = const_cast<char *>(gServerTlsKeyFileString.c_str());
+                logOutputErrorConsole("server.tls.key is empty");
+                std::filesystem::path checkKeyPath(gServerTlsKeyFileString);
+                if (!std::filesystem::exists(checkKeyPath))
+                {
+                    logOutputErrorConsole("server.tls.key file not exists");
+                    gServerTlsKeyFileString = "";
+                }
+                else
+                {
+                    gServerTlsKeyFileChar = const_cast<char *>(gServerTlsKeyFileString.c_str());
+                }
             }
         }
 

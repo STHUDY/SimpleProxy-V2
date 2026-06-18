@@ -16,7 +16,7 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
         socklen_t clientLen = sizeof(clientAddr);
         int clientFd = accept(rgSocketServerFd, (struct sockaddr *)&clientAddr, &clientLen);
 
-        if (clientFd >= 0)
+        if (clientFd > 0)
         {
             // 成功接受连接
             char clientIp[INET_ADDRSTRLEN];
@@ -37,10 +37,6 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
         // accept 失败处理
         if (errno == EWOULDBLOCK || errno == EAGAIN)
         {
-            if (gConfigSocketNoBlockConnect)
-            {
-                usleep(gConfigSocketPollingIntervalMs * 1000);
-            }
             continue;
         }
 
@@ -52,7 +48,6 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
             break;
         case EMFILE:
             logOutputErrorConsoleCharString("Listen: too many open files, sleeping...");
-            usleep(gConfigSocketPollingIntervalMs * 1000);
             break;
         case ECONNABORTED:
             logOutputDebugConsoleCharString("Listen: connection aborted before accept");
@@ -63,7 +58,6 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
             snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s",
                      errno, strerror(errno));
             logOutputErrorConsoleCharString(errMsg);
-            usleep(gConfigSocketPollingIntervalMs * 1000);
             break;
         }
         }
@@ -219,44 +213,27 @@ void listenSocketServer(SocketClientCallback callback)
         return;
     }
 
-    // 设置非阻塞模式（如果需要）
-    if (gConfigSocketNoBlockConnect)
-    {
-        int flags = fcntl(rgSocketServerFd, F_GETFL, 0);
-        if (flags == -1)
-        {
-            logOutputErrorConsoleCharString("Listen: fcntl(F_GETFL) failed");
-            return;
-        }
-        if (fcntl(rgSocketServerFd, F_SETFL, flags | O_NONBLOCK) == -1)
-        {
-            logOutputErrorConsoleCharString("Listen: fcntl(F_SETFL) failed");
-            return;
-        }
-        logOutputDebugConsoleCharString("Listen: set non-blocking mode");
-    }
-    else if (gConfigSocketAcceptTimeoutMs > 0)
-    {
-        struct timeval tv;
-        tv.tv_sec = gConfigSocketAcceptTimeoutMs / 1000;
-        tv.tv_usec = (gConfigSocketAcceptTimeoutMs % 1000) * 1000;
-
-        if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
-        {
-            perror("Listen: setsockopt SO_SNDTIMEO");
-            close(rgSocketServerFd);
-            return;
-        }
-        if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
-        {
-            perror("Listen: setsockopt SO_RCVTIMEO");
-            close(rgSocketServerFd);
-            return;
-        }
-    }
-
     if (gConfigTlsSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
+        if (gConfigSocketAcceptTimeoutMs > 0)
+        {
+            struct timeval tv;
+            tv.tv_sec = gConfigSocketAcceptTimeoutMs / 1000;
+            tv.tv_usec = (gConfigSocketAcceptTimeoutMs % 1000) * 1000;
+
+            if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
+            {
+                perror("Listen: setsockopt SO_SNDTIMEO");
+                close(rgSocketServerFd);
+                return;
+            }
+            if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+            {
+                perror("Listen: setsockopt SO_RCVTIMEO");
+                close(rgSocketServerFd);
+                return;
+            }
+        }
         listenSocketConnectIoNone(callback);
     }
 
@@ -303,44 +280,6 @@ int connectSocketServer(SocketClientInfo *clientInfo)
     }
     logOutputDebugConsoleCharString("Connect: socket() success");
 
-    if (gConfigSocketNoBlockConnect)
-    {
-        int flags = fcntl(sockFd, F_GETFL, 0);
-        if (flags == -1)
-        {
-            logOutputErrorConsoleCharString("Connect: fcntl(F_GETFL) failed");
-            close(sockFd);
-            return -1;
-        }
-        if (fcntl(sockFd, F_SETFL, flags | O_NONBLOCK) == -1)
-        {
-            logOutputErrorConsoleCharString("Connect: fcntl(F_SETFL) failed");
-            close(sockFd);
-            return -1;
-        }
-        logOutputDebugConsoleCharString("Connect: set non-blocking mode");
-    }
-    else if (gConfigSocketConnectTimeoutMs > 0)
-    {
-        // 阻塞模式下设置收发超时
-        struct timeval tv;
-        tv.tv_sec = gConfigSocketConnectTimeoutMs / 1000;
-        tv.tv_usec = (gConfigSocketConnectTimeoutMs % 1000) * 1000;
-        if (setsockopt(sockFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
-        {
-            perror("Connect: setsockopt SO_SNDTIMEO");
-            close(sockFd);
-            return -1;
-        }
-        if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
-        {
-            perror("Connect: setsockopt SO_RCVTIMEO");
-            close(sockFd);
-            return -1;
-        }
-        logOutputDebugConsoleCharString("Connect: set socket timeout");
-    }
-
     // 构建服务器地址
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
@@ -383,62 +322,48 @@ int connectSocketServer(SocketClientInfo *clientInfo)
 
     if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
-        int connectRet = connect(sockFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
-        if (connectRet == 0)
+        if (gConfigSocketConnectTimeoutMs > 0)
         {
-            logOutputDebugConsoleCharString("Connect: connection established immediately");
-        }
-        else if (errno == EINPROGRESS && gConfigSocketNoBlockConnect)
-        {
-            logOutputDebugConsoleCharString("Connect: connection in progress, start polling...");
-            // 直接使用配置变量，不提供默认值
-            int timeoutMs = gConfigSocketConnectTimeoutMs;       // 可能为 -1（无限等待）或正数
-            int pollIntervalMs = gConfigSocketPollingIntervalMs; // 保证 > 0
-
-            bool connected = false;
-
-            while (!connected)
+            // 阻塞模式下设置收发超时
+            struct timeval tv;
+            tv.tv_sec = gConfigSocketConnectTimeoutMs / 1000;
+            tv.tv_usec = (gConfigSocketConnectTimeoutMs % 1000) * 1000;
+            if (setsockopt(sockFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
             {
-                int soError = 0;
-                socklen_t len = sizeof(soError);
-                if (getsockopt(sockFd, SOL_SOCKET, SO_ERROR, &soError, &len) < 0)
-                {
-                    logOutputErrorConsoleCharString("Connect: getsockopt(SO_ERROR) failed");
-                    break;
-                }
-                if (soError == 0)
-                {
-                    connected = true;
-                    break;
-                }
-                else if (soError != 0 && soError != EINPROGRESS)
-                {
-                    char errBuf[256];
-                    snprintf(errBuf, sizeof(errBuf), "Connect: connection failed - %s", strerror(soError));
-                    logOutputErrorConsoleCharString(errBuf);
-                    break;
-                }
-
-                timeoutMs -= pollIntervalMs;
-
-                // 超时检查（仅当 timeoutMs > 0 时）
-                if (timeoutMs < 0)
-                {
-                    logOutputErrorConsoleCharString("Connect: connection timeout");
-                    break;
-                }
-
-                usleep(pollIntervalMs * 1000);
-            }
-
-            if (!connected)
-            {
+                perror("Connect: setsockopt SO_SNDTIMEO");
                 close(sockFd);
                 return -1;
             }
-            logOutputDebugConsoleCharString("Connect: non-blocking connection established via polling");
+            if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+            {
+                perror("Connect: setsockopt SO_RCVTIMEO");
+                close(sockFd);
+                return -1;
+            }
+            logOutputDebugConsoleCharString("Connect: set socket timeout");
         }
-        else
+
+        bool isBreak = false;
+
+        while (!isBreak)
+        {
+            int connectRet = connect(sockFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+            if (connectRet == 0)
+            {
+                logOutputDebugConsoleCharString("Connect: connection established immediately");
+                break;
+            }
+            else if (errno == EINPROGRESS)
+            {
+                continue;
+            }
+            else
+            {
+                isBreak = true;
+            }
+        }
+
+        if (isBreak)
         {
             char errMsg[256];
             snprintf(errMsg, sizeof(errMsg), "Connect: connect() failed - %s", strerror(errno));

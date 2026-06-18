@@ -1,6 +1,7 @@
 config:
   socket:
     ioUseMode: none
+    useThreadpoolAccept: true
     noBlockReadOrWrite: true
     noBlockConnect: true
     acceptTimeoutMs: 5000
@@ -24,7 +25,7 @@ config:
     file: false
     level: info
     filePath: "./proxy.log"
-  threadPool:
+  threadpool:
     minWokers: 10
     maxWokers: 1000
     clearThreadTimeMs: 60000

@@ -506,7 +506,6 @@ static bool isValidTlsHost(const char *host)
 }
 void initTlsServer()
 {
-
     if (gConfigTlsEnbale == false)
     {
         logOutputErrorConsoleCharString("Init: tls server is disabled");
@@ -521,7 +520,6 @@ void initTlsServer()
 
     logOutputDebugConsoleCharString("Init: start init tls server");
     OPENSSL_init_ssl(OPENSSL_INIT_SSL_DEFAULT | OPENSSL_INIT_LOAD_CONFIG, NULL);
-    signal(SIGPIPE, SIG_IGN);
 
     // 参数有效性检查
     if (gServerHostChar == NULL || gServerHostChar[0] == '\0')

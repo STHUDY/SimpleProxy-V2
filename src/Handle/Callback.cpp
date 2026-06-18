@@ -25,21 +25,17 @@ static bool isIpAllowed(const std::string &ip_str)
     }
 }
 
-void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
+static void socketCreateProxyMission(SocketClientInfo *aConnectInfo, SocketClientInfo *bConnectInfo)
 {
-    // 必须CopySocketClientInfo
-    std::string clientAddr = std::string(socketClientInfo->ip_str) + ":" + std::to_string(socketClientInfo->port);
+    std::string clientAddr = std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port);
 
-    if (!isIpAllowed(socketClientInfo->ip_str))
+    if (!isIpAllowed(aConnectInfo->ip_str))
     {
-        logOutputErrorConsole("SECURITY: Access denied - IP '" + std::string(socketClientInfo->ip_str) + "' is blocked by firewall rules");
-        shutdown(socketClientInfo->fd, SHUT_RDWR);
-        close(socketClientInfo->fd);
+        logOutputErrorConsole("SECURITY: Access denied - IP '" + std::string(aConnectInfo->ip_str) + "' is blocked by firewall rules");
+        shutdown(aConnectInfo->fd, SHUT_RDWR);
+        close(aConnectInfo->fd);
         return;
     }
-
-    SocketClientInfo *aConnectInfo = new SocketClientInfo(*socketClientInfo);
-    SocketClientInfo *bConnectInfo = new SocketClientInfo;
 
     if (connectSocketServer(bConnectInfo) < 0)
     {
@@ -68,6 +64,23 @@ void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
     rgThreadPool.pushMission(socketProxyWorkerSingle, bConnectInfo, aConnectInfo, gServerSocketBufferSize, shareInfo, std::string("server -> proxy -> client "));
 }
 
+void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
+{
+
+    // 必须CopySocketClientInfo
+    SocketClientInfo *aConnectInfo = new SocketClientInfo(*socketClientInfo);
+    SocketClientInfo *bConnectInfo = new SocketClientInfo;
+
+    if (gConfigSocketUseThreadpoolAccept)
+    {
+        rgThreadPool.pushMission(socketCreateProxyMission, aConnectInfo, bConnectInfo);
+    }
+    else
+    {
+        socketCreateProxyMission(aConnectInfo, bConnectInfo);
+    }
+}
+
 void socketListenerCallback()
 {
     listenSocketServer(socketServerCallback);
@@ -81,29 +94,13 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
     char *buffer = new char[bufferSize];
 
     std::unique_lock<std::mutex> ulock(*mutex);
+
     if (shareInfo->init == false)
     {
-        logOutputInfoConsole("New connection established - Client: " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port) + " -> Backend: " +
-                             std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
-        if (gConfigSocketNoBlockReadOrWrite)
+        if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
         {
-            int flags;
-            flags = fcntl(aSocket, F_GETFL, 0);
-            if (flags != -1)
-                fcntl(aSocket, F_SETFL, flags | O_NONBLOCK);
-            flags = fcntl(bSocket, F_GETFL, 0);
-            if (flags != -1)
-                fcntl(bSocket, F_SETFL, flags | O_NONBLOCK);
-        }
-        else
-        {
-            int flags;
-            flags = fcntl(aSocket, F_GETFL, 0);
-            if (flags != -1)
-                fcntl(aSocket, F_SETFL, flags & ~O_NONBLOCK);
-            flags = fcntl(bSocket, F_GETFL, 0);
-            if (flags != -1)
-                fcntl(bSocket, F_SETFL, flags & ~O_NONBLOCK);
+            logOutputInfoConsole("New connection established - Client: " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port) + " -> Backend: " +
+                                 std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
 
             if (gConfigSocketReadOrWriteTimeoutMs > 0)
             {
@@ -116,6 +113,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                 setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
             }
         }
+
         shareInfo->close = false;
         shareInfo->init = true;
     }
@@ -129,28 +127,30 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
         {
             if (shareInfo->close == true)
             {
-                break;
-            }
-
-            if (gConfigSocketReadOrWriteTimeoutMs > 0 && shareInfo->timeout > gConfigSocketReadOrWriteTimeoutMs)
-            {
+                logOutputDebugConsole("Connection closed - Client: " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port) + " -> Backend: " +
+                                      std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
                 break;
             }
 
             logOutputDebugConsole(headText + "Waiting for data from " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
-            ssize_t recvLen = recv(aSocket, buffer, bufferSize, 0);
+            ssize_t recvLen = recv(aSocket, buffer, bufferSize, MSG_NOSIGNAL);
             if (recvLen < 0)
             {
-                logOutputDebugConsole("recv error: " + std::string(strerror(errno)));
+                logOutputDebugConsole("recv error: " + std::string(strerror(errno)) + " - " + std::to_string(errno));
                 if (errno == EAGAIN || errno == EWOULDBLOCK)
                 {
+                    if (shareInfo->close == true)
+                    {
+                        logOutputDebugConsole("Connection closed - Client: " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port) + " -> Backend: " +
+                                              std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
+                        break;
+                    }
                     if (gConfigSocketReadOrWriteTimeoutMs > 0)
                     {
-                        if (gConfigSocketNoBlockReadOrWrite)
-                            shareInfo->timeout += gConfigSocketPollingIntervalMs;
-                        else
-                            shareInfo->timeout += gConfigSocketReadOrWriteTimeoutMs;
-                        usleep(gConfigSocketPollingIntervalMs * 1000);
+                        logOutputDebugConsole("Socket read or write timeout - " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
+                        shareInfo->close == true;
+                        isBreak = true;
+                        break;
                     }
                     continue;
                 }
@@ -166,9 +166,9 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                 isBreak = true;
                 break;
             }
+
             logOutputDebugConsole(headText + "Read " + std::to_string(recvLen) + " bytes from " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
             ssize_t sentTotal = 0;
-            shareInfo->timeout = 0;
             while (sentTotal < recvLen)
             {
                 if (gConfigSocketReadOrWriteTimeoutMs > 0 && shareInfo->timeout > gConfigSocketReadOrWriteTimeoutMs)
@@ -180,13 +180,18 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                 {
                     if (errno == EAGAIN || errno == EWOULDBLOCK)
                     {
+                        if (shareInfo->close == true)
+                        {
+                            logOutputDebugConsole("Connection closed - Client: " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port) + " -> Backend: " +
+                                                  std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
+                            break;
+                        }
                         if (gConfigSocketReadOrWriteTimeoutMs > 0)
                         {
-                            if (gConfigSocketNoBlockReadOrWrite)
-                                shareInfo->timeout += gConfigSocketPollingIntervalMs;
-                            else
-                                shareInfo->timeout += gConfigSocketReadOrWriteTimeoutMs;
-                            usleep(gConfigSocketPollingIntervalMs * 1000);
+                            logOutputDebugConsole("Socket read or write timeout - " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
+                            shareInfo->close == true;
+                            isBreak = true;
+                            break;
                         }
                         continue;
                     }
@@ -205,7 +210,6 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                 sentTotal += sentLen;
                 logOutputDebugConsole(headText + "Sent " + std::to_string(sentLen) + " bytes to " + std::string(bConnectInfo->ip_str) + ":" + std::to_string(bConnectInfo->port));
             }
-            shareInfo->timeout = 0;
 
             if (isBreak)
             {
