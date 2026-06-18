@@ -347,7 +347,7 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
                 SSL_CTX_free(ctx);
             }
 
-            if (aConnectInfo >= 0)
+            if (aSocket >= 0)
                 close(aSocket);
         }
 
