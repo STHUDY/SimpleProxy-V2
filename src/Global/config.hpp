@@ -11,8 +11,8 @@ extern std::vector<std::string> gServerConnectBanIpsList;
 
 extern std::string gClientHostString;
 
-extern std::string gClientHostNameString;
-extern std::string gClientSniString;
-extern std::string gServerCertFileString;
+extern std::string gClientTlsHostNameString;
+extern std::string gClientTlsSniString;
+extern std::string gClientTlsCertFileString;
 
 extern ThreadpoolAutoCtrlByTime rgThreadPool;

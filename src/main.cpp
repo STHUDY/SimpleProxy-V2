@@ -233,21 +233,26 @@ int main(int argc, char *argv[])
                 }
                 else
                 {
+                    logOutputInfoConsole("server.tls.cert file: " + gServerTlsCertFileString);
                     gServerTlsCertFileChar = const_cast<char *>(gServerTlsCertFileString.c_str());
                 }
             }
-            gServerTlsKeyFileString = config["server"]["tls"]["key"].as<std::string>("");
+            gServerTlsKeyFileString = config["server"]["tls"]["privkey"].as<std::string>("");
             if (gServerTlsKeyFileString == "")
             {
-                logOutputErrorConsole("server.tls.key is empty");
+                logOutputErrorConsole("server.tls.privkey is empty");
+            }
+            else
+            {
                 std::filesystem::path checkKeyPath(gServerTlsKeyFileString);
                 if (!std::filesystem::exists(checkKeyPath))
                 {
-                    logOutputErrorConsole("server.tls.key file not exists");
+                    logOutputErrorConsole("server.tls.privkey file not exists");
                     gServerTlsKeyFileString = "";
                 }
                 else
                 {
+                    logOutputInfoConsole("server.tls.privkey file: " + gServerTlsKeyFileString);
                     gServerTlsKeyFileChar = const_cast<char *>(gServerTlsKeyFileString.c_str());
                 }
             }
@@ -314,22 +319,22 @@ int main(int argc, char *argv[])
 
         gClientSocketBufferSize = config["client"]["socket"]["bufferSize"].as<int>(8192);
 
-        gClientHostNameString = config["client"]["tls"]["hostname"].as<std::string>("");
-        if (gClientHostNameString != "")
+        gClientTlsHostNameString = config["client"]["tls"]["hostname"].as<std::string>("");
+        if (gClientTlsHostNameString != "")
         {
-            gClientHostNameString = const_cast<char *>(gClientHostNameString.c_str());
+            gClientHostChar = const_cast<char *>(gClientTlsHostNameString.c_str());
         }
 
-        gClientSniString = config["client"]["tls"]["sni"].as<std::string>("");
-        if (gClientSniString != "")
+        gClientTlsSniString = config["client"]["tls"]["sni"].as<std::string>("");
+        if (gClientTlsSniString != "")
         {
-            gClientSniString = const_cast<char *>(gClientSniString.c_str());
+            gClientTlsSniChar = const_cast<char *>(gClientTlsSniString.c_str());
         }
 
-        gServerCertFileString = config["server"]["tls"]["cert"].as<std::string>("");
-        if (gServerCertFileString != "")
+        gClientTlsCertFileString = config["client"]["tls"]["cert"].as<std::string>("");
+        if (gClientTlsCertFileString != "")
         {
-            gServerCertFileString = const_cast<char *>(gServerCertFileString.c_str());
+            gClientTlsCertFileChar = const_cast<char *>(gClientTlsCertFileString.c_str());
         }
     }
     catch (YAML::Exception &e)

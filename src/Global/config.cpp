@@ -10,9 +10,9 @@ std::vector<std::string> gServerConnectBanIpsList;
 
 std::string gClientHostString;
 
-std::string gClientHostNameString;
-std::string gClientSniString;
-std::string gServerCertFileString;
+std::string gClientTlsHostNameString;
+std::string gClientTlsSniString;
+std::string gClientTlsCertFileString;
 
 // 运行时变量
 ThreadpoolAutoCtrlByTime rgThreadPool;

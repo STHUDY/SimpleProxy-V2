@@ -151,7 +151,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                     if (gConfigSocketReadOrWriteTimeoutMs > 0)
                     {
                         logOutputDebugConsole("Socket read or write timeout - " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
-                        shareInfo->close == true;
+                        shareInfo->close = true;
                         isBreak = true;
                         break;
                     }
@@ -174,10 +174,6 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
             ssize_t sentTotal = 0;
             while (sentTotal < recvLen)
             {
-                if (gConfigSocketReadOrWriteTimeoutMs > 0 && shareInfo->timeout > gConfigSocketReadOrWriteTimeoutMs)
-                {
-                    break;
-                }
                 ssize_t sentLen = send(bSocket, buffer + sentTotal, recvLen - sentTotal, MSG_NOSIGNAL);
                 if (sentLen < 0)
                 {
@@ -192,7 +188,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                         if (gConfigSocketReadOrWriteTimeoutMs > 0)
                         {
                             logOutputDebugConsole("Socket read or write timeout - " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
-                            shareInfo->close == true;
+                            shareInfo->close = true;
                             isBreak = true;
                             break;
                         }
@@ -281,6 +277,8 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
             return;
         }
 
+        SSL_set_fd(ssl, aSocket);
+
         int sslAccept = 0;
         int sslConnErr = 0;
 
@@ -299,6 +297,7 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
                 strncpy(tlsClientInfo.ip_str, aConnectInfo->ip_str, INET_ADDRSTRLEN);
                 tlsClientInfo.port = aConnectInfo->port;
                 tlsCallback(aSocket, &tlsClientInfo);
+                logOutputDebugConsole("TLS Accept success");
                 break;
             }
 
@@ -350,9 +349,9 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
             if (aSocket >= 0)
                 close(aSocket);
         }
-
-        delete aConnectInfo;
     }
+
+    delete aConnectInfo;
 }
 
 static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
@@ -448,6 +447,8 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
     // 必须复制TlsClientInfo
     TlsClientInfo *aConnectInfo = new TlsClientInfo(*tlsClientInfo);
     TlsClientInfo *bConnectInfo = new TlsClientInfo;
+
+    logOutputDebugConsole("create tls proxy thread");
 
     if (gConfigTlsUseThreadpoolSslConnect)
     {
