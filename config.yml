@@ -8,8 +8,8 @@ config:
     connectTimeoutMs: 5000
     pollingIntervalMs: 100
     readOrWriteTimeoutMs: 5000
-  tls: 
-    enable: false  # 如果要处理HTTPS/TLS流量，请设置为true，并确保cert和key文件存在
+  tls:
+    enable: false # 如果要处理HTTPS/TLS流量，请设置为true，并确保cert和key文件存在
     socketIoUseMode: none
     sslIoUseMode: none
     useThreadpoolAccept: true
@@ -21,7 +21,7 @@ config:
     pollingIntervalMs: 100
     readOrWriteTimeoutMs: 5000
   log:
-    enable: true 
+    enable: true
     console: true
     file: false
     level: info
@@ -39,17 +39,17 @@ server:
     bufferSize: 1024
     maxBacklog: 128
   tls:
-    cert: cert.pem  # TLS证书文件路径（当tls.enable=true时必需）
-    key: key.pem    # TLS私钥文件路径（当tls.enable=true时必需）
+    cert: cert.pem # TLS证书文件路径（当tls.enable=true时必需）
+    key: key.pem # TLS私钥文件路径（当tls.enable=true时必需）
   connect:
     banIps: []
     allowedIps: []
 client:
   host: 0.0.0.0
   port: 10808
-  socket: 
+  socket:
     bufferSize: 1024
   tls:
-    hostname: 0.0.0.0  # 目标服务器主机名（用于证书验证）
-    sni: 0.0.0.0       # SNI扩展（通常与hostname相同）
-    cert:            # CA证书文件路径（可选，用于自定义CA验证）
+    hostname: 0.0.0.0 # 目标服务器主机名（用于证书验证）
+    sni: 0.0.0.0 # SNI扩展（通常与hostname相同）
+    cert: # CA证书文件路径（可选，用于自定义CA验证）

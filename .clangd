@@ -1,0 +1,9 @@
+CompileFlags:
+  CompilationDatabase: build/
+  Add:
+    - "-Isrc"
+    - "-Isrc/Global"
+    - "-Isrc/Handle"
+    - "-Isrc/Log"
+    - "-Isrc/ProtocolServer"
+    - "-Isrc/Threadpool"

@@ -8,11 +8,13 @@ find_package(yaml-cpp REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 # 包含源文件
-file(GLOB_RECURSE SOURCES 
+file(GLOB_RECURSE SOURCES
     "${PROJECT_SOURCE_DIR}/src/**/*.cpp"
     "${PROJECT_SOURCE_DIR}/src/**/*.hpp"
     "${PROJECT_SOURCE_DIR}/src/**/*.h"
     "${PROJECT_SOURCE_DIR}/src/**/*.c")
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # 启用 C++11
 set(CMAKE_CXX_STANDARD 17)
