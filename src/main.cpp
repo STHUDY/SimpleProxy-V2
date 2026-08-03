@@ -298,23 +298,77 @@ int main(int argc, char *argv[])
             logOutputWarnConsole("Firewall disabled - all IPs are allowed");
         }
 
-        gClientHostString = config["client"]["host"].as<std::string>("");
-        gClientPort = config["client"]["port"].as<int>(0);
+        // 解析 client host (支持数组和单个值)
+        YAML::Node clientHostNode = config["client"]["host"];
+        if (clientHostNode.IsSequence())
+        {
+            for (const auto &host : clientHostNode)
+            {
+                gClientHostList.push_back(host.as<std::string>());
+            }
+        }
+        else if (clientHostNode.IsScalar())
+        {
+            gClientHostList.push_back(clientHostNode.as<std::string>());
+        }
 
-        if (gClientHostString == "")
+        // 解析 client port (支持数组和单个值)
+        YAML::Node clientPortNode = config["client"]["port"];
+        if (clientPortNode.IsSequence())
+        {
+            for (const auto &port : clientPortNode)
+            {
+                gClientPortList.push_back(port.as<int>());
+            }
+        }
+        else if (clientPortNode.IsScalar())
+        {
+            gClientPortList.push_back(clientPortNode.as<int>());
+        }
+
+        if (gClientHostList.empty())
         {
             logOutputFatalConsole("client host is empty");
             return EXIT_FAILURE;
         }
-        else if (gClientPort <= 0)
+        if (gClientPortList.empty())
         {
             logOutputFatalConsole("client port is empty");
             return EXIT_FAILURE;
         }
+
+        if (gClientHostList.size() != gClientPortList.size())
+        {
+            logOutputFatalConsole("client host and port count mismatch");
+            return EXIT_FAILURE;
+        }
+
+        // 设置 selectMode (默认轮询)
+        std::string selectModeStr = config["client"]["selectMode"].as<std::string>("roundRobin");
+        if (selectModeStr == "random")
+        {
+            gClientSelectMode = CLIENT_SELECT_RANDOM;
+        }
         else
         {
-            logOutputInfoConsole("client host: " + gClientHostString + " port: " + std::to_string(gClientPort));
-            gClientHostChar = const_cast<char *>(gClientHostString.c_str());
+            gClientSelectMode = CLIENT_SELECT_ROUND_ROBIN;
+        }
+
+        // 初始化第一个后端连接
+        gClientHostChar = const_cast<char *>(gClientHostList[0].c_str());
+        gClientPort = gClientPortList[0];
+
+        if (gClientHostList.size() > 1)
+        {
+            logOutputInfoConsole("client backend: " + std::to_string(gClientHostList.size()) + " targets, selectMode: " + selectModeStr);
+            for (size_t i = 0; i < gClientHostList.size(); i++)
+            {
+                logOutputInfoConsole("  [" + std::to_string(i) + "] " + gClientHostList[i] + ":" + std::to_string(gClientPortList[i]));
+            }
+        }
+        else
+        {
+            logOutputInfoConsole("client host: " + gClientHostList[0] + " port: " + std::to_string(gClientPortList[0]));
         }
 
         gClientSocketBufferSize = config["client"]["socket"]["bufferSize"].as<int>(8192);

@@ -25,6 +25,39 @@ static bool isIpAllowed(const std::string &ip_str)
     }
 }
 
+void selectBackendTarget()
+{
+    if (gClientHostList.empty() || gClientPortList.empty())
+    {
+        return;
+    }
+
+    size_t selectedIndex = 0;
+    size_t listSize = gClientHostList.size();
+
+    if (listSize == 1)
+    {
+        selectedIndex = 0;
+    }
+    else if (gClientSelectMode == CLIENT_SELECT_RANDOM) // random
+    {
+        selectedIndex = rand() % listSize;
+    }
+    else // roundRobin (default)
+    {
+        std::lock_guard<std::mutex> lock(gClientRoundRobinMutex);
+        selectedIndex = gClientRoundRobinIndex;
+        gClientRoundRobinIndex = (gClientRoundRobinIndex + 1) % listSize;
+    }
+
+    // 更新全局变量供C代码使用
+    // 注意: gClientHostList[selectedIndex] 是临时string, 需要复制到静态或全局
+    static std::string selectedHost;
+    selectedHost = gClientHostList[selectedIndex];
+    gClientHostChar = const_cast<char *>(selectedHost.c_str());
+    gClientPort = gClientPortList[selectedIndex];
+}
+
 static void socketCreateProxyMission(SocketClientInfo *aConnectInfo, SocketClientInfo *bConnectInfo)
 {
     std::string clientAddr = std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port);
@@ -39,6 +72,8 @@ static void socketCreateProxyMission(SocketClientInfo *aConnectInfo, SocketClien
         delete bConnectInfo;
         return;
     }
+
+    selectBackendTarget();
 
     if (connectSocketServer(bConnectInfo) < 0)
     {
@@ -390,6 +425,8 @@ static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bC
         sniStr = gClientTlsSniChar;
         sni = sniStr.c_str();
     }
+
+    selectBackendTarget();
 
     if (connectTlsServer(bConnectInfo, sni) < 0)
     {

@@ -37,6 +37,8 @@ extern "C"
 
     void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo);
 
+    void selectBackendTarget();
+
 #ifdef __cplusplus
 }
 #endif

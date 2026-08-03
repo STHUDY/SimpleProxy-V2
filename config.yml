@@ -45,8 +45,9 @@ server:
     banIps: []
     allowedIps: []
 client:
-  host: 0.0.0.0
-  port: 10808
+  host: [0.0.0.0]  # 支持数组: [0.0.0.0, 0.0.0.0]
+  port: [10808]    # 支持数组: [10808, 12080]
+  selectMode: roundRobin  # 选择模式: roundRobin (轮询) 或 random (随机)
   socket:
     bufferSize: 1024
   tls:

@@ -12,4 +12,7 @@
 #define LOG_LEVEL_ERROR 3
 #define LOG_LEVEL_FATAL 4
 
+#define CLIENT_SELECT_ROUND_ROBIN 0
+#define CLIENT_SELECT_RANDOM 1
+
 #endif
