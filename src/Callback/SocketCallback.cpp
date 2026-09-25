@@ -128,7 +128,6 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                     if (gConfigSocketReadOrWriteTimeoutMs > 0)
                     {
                         logOutputDebugConsole("Socket read or write timeout - " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
-                        shareInfo->close = true;
                         isBreak = true;
                         break;
                     }
@@ -165,7 +164,6 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                         if (gConfigSocketReadOrWriteTimeoutMs > 0)
                         {
                             logOutputDebugConsole("Socket read or write timeout - " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
-                            shareInfo->close = true;
                             isBreak = true;
                             break;
                         }
