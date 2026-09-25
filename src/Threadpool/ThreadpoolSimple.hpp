@@ -93,7 +93,7 @@ private:
 public:
     ThreadpoolSimple();
     ThreadpoolSimple(size_t poolSize);
-
+    
     void setPoolSize(size_t poolSize);
     void openOutputError();
     void closeOutputError();
@@ -103,6 +103,7 @@ public:
     bool popMission();
     MissionBase *getAndPopMission();
     void clearMissions();
+    void managerNotifyOnce();
 
     void sthutdown();
 
@@ -130,6 +131,7 @@ void ThreadpoolSimple::createMission(F &&task, Args &&...args)
 
     std::lock_guard<std::mutex> lock(mission_list_mutex);
     mission_list.push_back(mission);
+    this->managerNotifyOnce();
 }
 
 template <typename F, typename... Args>

@@ -145,7 +145,7 @@ void ThreadpoolAutoCtrlByTime::closeOutputError()
 void ThreadpoolAutoCtrlByTime::setMaxThreadNumber(size_t maxThreadNumber)
 {
     this->max_thread_number = maxThreadNumber + 1;
-    if (this->max_thread_number < this->min_thread_number)
+    if (this->min_thread_number > 0 && this->max_thread_number < this->min_thread_number)
     {
         this->max_thread_number = this->min_thread_number;
     }
@@ -164,7 +164,7 @@ void ThreadpoolAutoCtrlByTime::setClearThreadTimeMs(int clearThreadTimeMs)
 void ThreadpoolAutoCtrlByTime::setMinThreadNumber(size_t minThreadNumber)
 {
     this->min_thread_number = minThreadNumber + 1;
-    if (this->min_thread_number > this->max_thread_number)
+    if (this->min_thread_number > this->max_thread_number && this->max_thread_number > 0)
     {
         this->min_thread_number = this->max_thread_number;
     }
