@@ -199,7 +199,7 @@ void ThreadpoolAutoCtrlByTime::init()
 
 void ThreadpoolAutoCtrlByTime::shutdown(bool isForce)
 {
-    if (!isForce)
+    if (!isForce && !this->is_shutdown)
     {
         this->waitMissionDone();
     }

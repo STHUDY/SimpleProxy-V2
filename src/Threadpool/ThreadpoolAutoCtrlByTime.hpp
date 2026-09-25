@@ -5,7 +5,7 @@
 class ThreadpoolAutoCtrlByTime : public ThreadpoolSimple
 {
 private:
-    bool is_shutdown = false;
+    bool is_shutdown = true;
     bool is_stop_add_mission = false;
 
     size_t max_thread_number = 0;

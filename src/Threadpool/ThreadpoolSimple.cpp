@@ -308,6 +308,7 @@ void ThreadpoolSimple::clearMissions()
 
 void ThreadpoolSimple::sthutdown()
 {
+    
     this->threadpool_is_close = true;
     {
         std::unique_lock<std::mutex> lock(this->mission_list_mutex);
