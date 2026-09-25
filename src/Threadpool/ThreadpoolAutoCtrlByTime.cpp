@@ -17,10 +17,11 @@ void ThreadpoolAutoCtrlByTime::managerThreadpool()
 
         if (this->wait_time_ms <= 0)
         {
-            timeout = std::chrono::duration_cast<std::chrono::microseconds>(now - waitLastTime).count() % 500;
+            timeout = std::chrono::duration_cast<std::chrono::microseconds>(now - waitLastTime).count();
+            timeout %= this->duration_div_time_ms;
             if (timeout == 0)
             {
-                timeout = 1;
+                timeout = 10;
             }
         }
         else
@@ -45,29 +46,46 @@ void ThreadpoolAutoCtrlByTime::managerThreadpool()
 
         if (pendingMissions > freeThreads)
         {
-            size_t targetThreads = poolSize;
-            const size_t requiredThreads = std::min(
-                busyThreads + pendingMissions,
-                this->max_thread_number);
+            // 总需求：正在忙的线程 + 等待处理的任务
+            const size_t totalDemand = busyThreads + pendingMissions;
+
+            // 距离满足需求还差多少线程
+            // pendingMissions > freeThreads 时，通常 needIncrease > 0
+            const size_t needIncrease = totalDemand > poolSize
+                                            ? totalDemand - poolSize
+                                            : 0;
+
+            size_t increase = 0;
 
             if (this->add_thread_step > 0)
             {
-                targetThreads += this->add_thread_step;
-                targetThreads = std::min(targetThreads, this->max_thread_number);
+                // 固定步长扩容，但不要超过实际缺口
+                increase = std::min(needIncrease, static_cast<size_t>(this->add_thread_step));
             }
             else
             {
-                targetThreads += std::min(busyThreads, pendingMissions / 2);
-                targetThreads = std::min(targetThreads, this->max_thread_number);
+                // 没配置步长时，按待处理任务量的一半扩容，至少加 1 个
+                increase = std::min(
+                    needIncrease,
+                    std::max<size_t>(1, pendingMissions / 2));
             }
+
+            size_t targetThreads = std::min(
+                this->max_thread_number,
+                poolSize + increase);
+
+            // 扩容分支不允许减少线程数
+            targetThreads = std::max(targetThreads, poolSize);
 
             if (targetThreads != poolSize)
             {
                 ThreadpoolSimple::setPoolSize(targetThreads);
                 lastAdjustTime = now;
-                std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
-                continue;
             }
+
+            // 有任务积压时，不要进入后面的缩容逻辑
+            std::this_thread::sleep_for(std::chrono::milliseconds(timeout));
+            continue;
         }
 
         const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastAdjustTime);
@@ -159,7 +177,17 @@ void ThreadpoolAutoCtrlByTime::setStepAddThreadNumber(int stepAddThreadNumber)
 
 void ThreadpoolAutoCtrlByTime::setMissionDropCallback(std::function<void(std::vector<std::any>)> callback)
 {
-    mission_drop_callback = std::move(callback);
+    this->mission_drop_callback = std::move(callback);
+}
+
+void ThreadpoolAutoCtrlByTime::setWorkerCreateFailCallback(std::function<void(std::string)> callback)
+{
+    this->worker_create_fail_callback = callback;
+}
+
+void ThreadpoolAutoCtrlByTime::setManagerCreateFailCallback(std::function<void(std::string)> callback)
+{
+    this->manager_create_fail_callback = callback;
 }
 
 void ThreadpoolAutoCtrlByTime::init()
@@ -189,7 +217,8 @@ void ThreadpoolAutoCtrlByTime::waitMissionDone()
         const auto now = std::chrono::steady_clock::now();
         if (this->wait_time_ms <= 0)
         {
-            timeout = std::chrono::duration_cast<std::chrono::microseconds>(now - waitLastTime).count() % 500;
+            timeout = std::chrono::duration_cast<std::chrono::microseconds>(now - waitLastTime).count();
+            timeout %= this->duration_div_time_ms;
             if (timeout == 0)
             {
                 timeout = 10;

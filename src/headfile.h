@@ -17,7 +17,7 @@
 #include <openssl/err.h>
 #include <netdb.h>
 #include <sys/epoll.h>
-#include <sys/resource.h> 
+#include <sys/resource.h>
 //=================C++库==================
 #ifdef __cplusplus
 #include <iostream>
@@ -48,5 +48,7 @@
 #include "ThreadpoolAutoCtrlByTime.hpp"
 #include "config.hpp"
 #include "Log.hpp"
-#include "Callback.hpp"
+#include "CallbackBase.hpp"
+#include "SocketCallback.hpp"
+#include "TlsCallback.hpp"
 #endif

@@ -88,6 +88,8 @@ private:
 
     void assignMissions();
 
+    void errorOutputInfo(int type, std::string info);
+
 public:
     ThreadpoolSimple();
     ThreadpoolSimple(size_t poolSize);
@@ -95,7 +97,6 @@ public:
     void setPoolSize(size_t poolSize);
     void openOutputError();
     void closeOutputError();
-    void notifyManagerThread();
 
     template <typename F, typename... Args>
     bool pushMission(F &&task, Args &&...args);
@@ -113,7 +114,7 @@ public:
     ~ThreadpoolSimple();
 
 protected:
-    virtual void createWorkThreadErrorCallback(void)
+    virtual void errorCallback(int type, std::string info)
     {
         return;
     }
@@ -137,7 +138,6 @@ inline bool ThreadpoolSimple::pushMission(F &&task, Args &&...args)
     if (this->is_can_submit_mission)
     {
         this->createMission(task, args...);
-        this->notifyManagerThread();
     }
     return this->is_can_submit_mission;
 }

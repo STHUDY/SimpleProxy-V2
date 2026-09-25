@@ -81,6 +81,21 @@ void setFileDescriptorLimit()
     }
 }
 
+void missionDropCallback(std::vector<std::any> args)
+{
+    logOutputErrorConsole("exec_mission error");
+}
+
+void workerCreateFailCallback(std::string info)
+{
+    logOutputErrorConsole("create_worker error - " + info);
+}
+
+void managerCreateFailCallback(std::string info)
+{
+    logOutputFatalConsole("create_manager error - " + info);
+}
+
 int main(int argc, char *argv[])
 {
     signal(SIGPIPE, SIG_IGN);
@@ -420,7 +435,10 @@ int main(int argc, char *argv[])
     rgThreadPool.setClearThreadTimeMs(gConfigThreadpoolClearThreadTimeMs);
     rgThreadPool.setWaitTimeMs(gConfigThreadpoolPollingIntervalMs);
     rgThreadPool.setStepAddThreadNumber(gConfigThreadpoolStepAddWorkers);
-    rgThreadPool.openOutputError();
+    rgThreadPool.setWorkerCreateFailCallback(workerCreateFailCallback);
+    rgThreadPool.setManagerCreateFailCallback(managerCreateFailCallback);
+    rgThreadPool.setMissionDropCallback(missionDropCallback);
+    rgThreadPool.closeOutputError();
 
     if (gConfigTlsEnbale)
     {

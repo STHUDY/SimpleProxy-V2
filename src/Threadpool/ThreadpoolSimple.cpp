@@ -24,10 +24,8 @@ void ThreadpoolSimple::createManagerThread()
                                 }
                                 catch (const std::exception &e)
                                 {
-                                    if (this->is_output_error)
-                                        std::cerr << e.what() << '\n';
                                     this->pool_size -= 1;
-                                    this->createWorkThreadErrorCallback();
+                                    this->errorOutputInfo(0x0001, e.what());
                                 }
 
                                 this->assignMissions();
@@ -42,7 +40,8 @@ void ThreadpoolSimple::createManagerThread()
                     if (mission_count == 0 && !this->threadpool_is_close)
                     {
                         std::unique_lock<std::mutex> lockManager(this->manager_mutex);
-                        this->cv_manager.wait(lockManager);
+                        this->cv_manager.wait(lockManager, [this]
+                                              { return !this->mission_list.empty() || this->threadpool_is_close; });
                     }
 
                     this->assignMissions();
@@ -63,12 +62,7 @@ void ThreadpoolSimple::createManagerThread()
     }
     catch (const std::exception &e)
     {
-        if (this->is_output_error)
-        {
-            std::cout << "ManagerThreadCreateError: " << e.what() << std::endl;
-        }
-
-        throw e;
+        this->errorOutputInfo(0xFF01, e.what());
     }
 }
 
@@ -91,11 +85,6 @@ void ThreadpoolSimple::createWorkThread()
         {
             std::unique_lock<std::mutex> lock(this->work_count_mutex);
             this->working_thread_number -= 1;
-        }
-
-        if (this->is_output_error)
-        {
-            std::cout << "WorkMemoryAllocError: " << e.what() << std::endl;
         }
 
         throw e;
@@ -147,13 +136,9 @@ void ThreadpoolSimple::createWorkThread()
                         }
                         catch (const std::exception &e)
                         {
-                            if (this->is_output_error)
-                            {
-                                std::cout << "MissionError: " << e.what() << std::endl;
-                            }
+                            this->errorOutputInfo(0x0002, std::string(e.what()));
                         }
                         delete mission;
-                        this->notifyManagerThread();
                     }
 
                     {
@@ -184,11 +169,6 @@ void ThreadpoolSimple::createWorkThread()
         {
             std::unique_lock<std::mutex> lock(this->work_count_mutex);
             this->working_thread_number -= 1;
-        }
-
-        if (this->is_output_error)
-        {
-            std::cout << "WorkThreadCreateError: " << e.what() << std::endl;
         }
 
         throw e;
@@ -239,6 +219,30 @@ void ThreadpoolSimple::assignMissions()
     }
 }
 
+void ThreadpoolSimple::errorOutputInfo(int type, std::string info)
+{
+    this->errorCallback(type, info);
+    if (!this->is_output_error)
+        return;
+
+    std::string error_info;
+
+    if (type == 0x0001)
+    {
+        error_info = "create_worker error - " + info;
+    }
+    else if (type == 0x0002)
+    {
+        error_info = "exec_mission error - " + info;
+    }
+    else if (type == 0xFF01)
+    {
+        error_info = "create_manager error - " + info;
+    }
+
+    std::cout << error_info << std::endl;
+}
+
 ThreadpoolSimple::ThreadpoolSimple()
 {
     createManagerThread();
@@ -252,7 +256,6 @@ ThreadpoolSimple::ThreadpoolSimple(size_t poolSize) : pool_size(poolSize)
 void ThreadpoolSimple::setPoolSize(size_t poolSize)
 {
     this->pool_size = poolSize;
-    this->notifyManagerThread();
 }
 
 void ThreadpoolSimple::openOutputError()
@@ -263,12 +266,6 @@ void ThreadpoolSimple::openOutputError()
 void ThreadpoolSimple::closeOutputError()
 {
     this->is_output_error = false;
-}
-
-void ThreadpoolSimple::notifyManagerThread()
-{
-    std::unique_lock<std::mutex> lockManager(this->manager_mutex);
-    this->cv_manager.notify_one();
 }
 
 bool ThreadpoolSimple::popMission()
@@ -285,7 +282,7 @@ bool ThreadpoolSimple::popMission()
     return mission_count == 0 ? true : false;
 }
 
-ThreadpoolSimple::MissionBase * ThreadpoolSimple::getAndPopMission()
+ThreadpoolSimple::MissionBase *ThreadpoolSimple::getAndPopMission()
 {
     std::unique_lock<std::mutex> lock(this->mission_list_mutex);
 
@@ -316,13 +313,9 @@ void ThreadpoolSimple::sthutdown()
         std::unique_lock<std::mutex> lock(this->mission_list_mutex);
         this->is_can_submit_mission = false;
     }
-    this->notifyManagerThread();
-    
-    // 修复：在关闭前清理剩余任务，防止内存泄漏
-    this->clearMissions();
-
     if (this->manager_thread != nullptr)
     {
+        this->cv_manager.notify_all();
         this->manager_thread->join();
         delete this->manager_thread;
     }
