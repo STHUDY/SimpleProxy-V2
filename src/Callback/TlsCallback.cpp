@@ -238,8 +238,8 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
     // 初始化为-1表示未创建
     int epollFd = -1;
 
-    char *bufferAtoB = new char[gClientSocketBufferSize + 1];
-    char *bufferBtoA = new char[gServerSocketBufferSize + 1];
+    char *bufferAtoB = new (std::align_val_t(64)) char[gClientSocketBufferSize];
+    char *bufferBtoA = new (std::align_val_t(64)) char[gServerSocketBufferSize];
 
     // 用于标记是否需要执行清理逻辑的 lambda
     auto cleanup = [&]()
@@ -249,8 +249,8 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
             close(epollFd);
         }
 
-        delete[] bufferAtoB;
-        delete[] bufferBtoA;
+        operator delete[](bufferAtoB, std::align_val_t(64));
+        operator delete[](bufferBtoA, std::align_val_t(64));
 
         if (bSsl)
         {

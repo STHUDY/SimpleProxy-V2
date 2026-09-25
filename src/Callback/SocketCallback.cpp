@@ -71,7 +71,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
     std::mutex *mutex = shareInfo->mutex;
     int aSocket = aConnectInfo->fd;
     int bSocket = bConnectInfo->fd;
-    char *buffer = new char[bufferSize + 1];
+    char *buffer = new (std::align_val_t(64)) char[bufferSize];
 
     std::unique_lock<std::mutex> ulock(*mutex);
 
@@ -194,7 +194,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
         }
     }
 
-    delete[] buffer;
+    operator delete[](buffer, std::align_val_t(64));
 
     ulock.lock();
     if (shareInfo->close == true)

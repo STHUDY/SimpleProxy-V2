@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <filesystem>
+#include <new>
 #endif
 //==================用户C库================
 #include "nSocket.h"
