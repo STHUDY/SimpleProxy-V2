@@ -4,11 +4,11 @@
 
 typedef struct TlsClientInfo TlsClientInfo;
 typedef struct SocketClientInfo SocketClientInfo;
-typedef void (*TlsClientCallback)(int clientFd, TlsClientInfo *clientInfo);
+typedef void (*TlsClientCallback)(TlsClientInfo *clientInfo);
 
 void tlsSocketUpgradeCallback(SocketClientInfo *clientInfo, TlsClientCallback tlsCallback);
 
-void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo);
+void tlsServerCallback(TlsClientInfo *tlsClientInfo);
 
 void tlsListenerCallback();
 

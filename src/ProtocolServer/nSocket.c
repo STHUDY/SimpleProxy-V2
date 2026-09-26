@@ -13,53 +13,54 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
     while (rgSocketServerRun)
     {
         struct sockaddr_in clientAddr;
-        socklen_t clientLen = sizeof(clientAddr);
-        int clientFd = accept(rgSocketServerFd, (struct sockaddr *)&clientAddr, &clientLen);
+        NET_SOCKLEN_T clientLen = sizeof(clientAddr);
+        SOCKET_T clientFd = accept(rgSocketServerFd, (struct sockaddr *)&clientAddr, &clientLen);
 
-        if (clientFd >= 0)
+        if (netSocketValid(clientFd))
         {
             // 成功接受连接
             char clientIp[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp, sizeof(clientIp));
             int clientPort = ntohs(clientAddr.sin_port);
-            SocketClientInfo clientInfo = {
-                .fd = clientFd,
-                .addr = clientAddr,
-                .addr_len = clientLen,
-                .port = clientPort};
+            SocketClientInfo clientInfo;
+            memset(&clientInfo, 0, sizeof(clientInfo));
+            clientInfo.fd = clientFd;
+            clientInfo.addr = clientAddr;
+            clientInfo.addr_len = clientLen;
+            clientInfo.port = clientPort;
             strncpy(clientInfo.ip_str, clientIp, INET_ADDRSTRLEN - 1);
             clientInfo.ip_str[INET_ADDRSTRLEN - 1] = '\0';
 
-            callback(clientFd, &clientInfo);
+            callback(&clientInfo);
             continue;
         }
 
         // accept 失败处理
-        if (errno == EWOULDBLOCK || errno == EAGAIN)
+        int acceptErr = netLastError();
+        if (netIsWouldBlock(acceptErr))
         {
             continue;
         }
 
         // 其他错误处理
-        switch (errno)
+        if (netIsInterrupted(acceptErr))
         {
-        case EINTR:
             // 被信号中断，继续循环
-            break;
-        case EMFILE:
+        }
+        else if (netIsFdExhausted(acceptErr))
+        {
             logOutputErrorConsoleCharString("Listen: too many open files, sleeping...");
-            break;
-        case ECONNABORTED:
+        }
+        else if (netIsAborted(acceptErr))
+        {
             logOutputDebugConsoleCharString("Listen: connection aborted before accept");
-            break;
-        default:
+        }
+        else
         {
             char errMsg[256];
             snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s",
-                     errno, strerror(errno));
+                     acceptErr, netErrorString(acceptErr));
             logOutputErrorConsoleCharString(errMsg);
-            break;
-        }
         }
     }
 
@@ -88,7 +89,6 @@ void initSocketServer()
         logOutputErrorConsoleCharString(err);
         return;
     }
-
     int backlog = gServerSocketMaxBacklog > 0 ? gServerSocketMaxBacklog : 5;
     if (backlog != gServerSocketMaxBacklog)
     {
@@ -101,24 +101,24 @@ void initSocketServer()
 
     // 创建 socket
     rgSocketServerFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (rgSocketServerFd < 0)
+    if (!netSocketValid(rgSocketServerFd))
     {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: socket() failed - %s", strerror(errno));
-        logOutputErrorConsoleCharString(error_msg);
+        char errorMsg[256];
+        snprintf(errorMsg, sizeof(errorMsg), "Init: socket() failed: %s", netErrorString(netLastError()));
+        logOutputErrorConsoleCharString(errorMsg);
         return;
     }
     logOutputDebugConsoleCharString("Init: socket created");
 
     // 设置端口重用
     int opt = 1;
-    if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) < 0)
     {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: setsockopt(SO_REUSEADDR) failed - %s", strerror(errno));
-        logOutputErrorConsoleCharString(error_msg);
-        close(rgSocketServerFd);
-        rgSocketServerFd = -1;
+        char errorMsg[256];
+        snprintf(errorMsg, sizeof(errorMsg), "Init: setsockopt(SO_REUSEADDR) failed - %s", netErrorString(netLastError()));
+        logOutputErrorConsoleCharString(errorMsg);
+        netSocketClose(rgSocketServerFd);
+        rgSocketServerFd = SOCKET_INVALID;
         return;
     }
     logOutputDebugConsoleCharString("Init: SO_REUSEADDR set");
@@ -127,7 +127,7 @@ void initSocketServer()
     memset(&rgSocketServerAddr, 0, sizeof(rgSocketServerAddr));
     rgSocketServerAddr.sin_family = AF_INET;
 
-    // 解析主机地址
+    // 解析主机地址：先看是不是特殊写法，再交给 getaddrinfo 统一处理
     if (strcmp(gServerHostChar, "0.0.0.0") == 0 || strcmp(gServerHostChar, "*") == 0)
     {
         rgSocketServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -138,27 +138,14 @@ void initSocketServer()
         rgSocketServerAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         logOutputDebugConsoleCharString("Init: binding to localhost");
     }
-    else
+    else if (!netResolveIpv4(gServerHostChar, &rgSocketServerAddr))
     {
-        // 尝试解析为 IPv4 点分十进制
-        if (inet_pton(AF_INET, gServerHostChar, &rgSocketServerAddr.sin_addr) <= 0)
-        {
-            // 不是 IP 地址，尝试域名解析
-            struct hostent *hostent = gethostbyname(gServerHostChar);
-            if (hostent == NULL)
-            {
-                char err[256];
-                snprintf(err, sizeof(err), "Init: cannot resolve hostname '%s'", gServerHostChar);
-                logOutputErrorConsoleCharString(err);
-                close(rgSocketServerFd);
-                rgSocketServerFd = -1;
-                return;
-            }
-            // 复制第一个 IPv4 地址
-            memcpy(&rgSocketServerAddr.sin_addr, hostent->h_addr_list[0], hostent->h_length);
-            logOutputDebugConsoleCharString("Init: hostname resolved");
-        }
-        // inet_pton 成功则地址已填充
+        char err[256];
+        snprintf(err, sizeof(err), "Init: cannot resolve hostname '%s'", gServerHostChar);
+        logOutputErrorConsoleCharString(err);
+        netSocketClose(rgSocketServerFd);
+        rgSocketServerFd = SOCKET_INVALID;
+        return;
     }
 
     // 输出最终绑定的 IP
@@ -169,14 +156,14 @@ void initSocketServer()
     logOutputDebugConsoleCharString(msg);
 
     // 绑定端口
-    rgSocketServerAddr.sin_port = htons(gServerPort);
+    rgSocketServerAddr.sin_port = htons((u_short)gServerPort);
     if (bind(rgSocketServerFd, (struct sockaddr *)&rgSocketServerAddr, sizeof(rgSocketServerAddr)) < 0)
     {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: bind(%s:%d) failed - %s", ipStr, gServerPort, strerror(errno));
-        logOutputErrorConsoleCharString(error_msg);
-        close(rgSocketServerFd);
-        rgSocketServerFd = -1;
+        char errorMsg[256];
+        snprintf(errorMsg, sizeof(errorMsg), "Init: bind(%s:%d) failed - %s", ipStr, gServerPort, netErrorString(netLastError()));
+        logOutputErrorConsoleCharString(errorMsg);
+        netSocketClose(rgSocketServerFd);
+        rgSocketServerFd = SOCKET_INVALID;
         return;
     }
     logOutputDebugConsoleCharString("Init: bind success");
@@ -184,11 +171,11 @@ void initSocketServer()
     // 监听
     if (listen(rgSocketServerFd, backlog) < 0)
     {
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: listen() failed - %s", strerror(errno));
-        logOutputErrorConsoleCharString(error_msg);
-        close(rgSocketServerFd);
-        rgSocketServerFd = -1;
+        char errorMsg[256];
+        snprintf(errorMsg, sizeof(errorMsg), "Init: listen() failed - %s", netErrorString(netLastError()));
+        logOutputErrorConsoleCharString(errorMsg);
+        netSocketClose(rgSocketServerFd);
+        rgSocketServerFd = SOCKET_INVALID;
         return; // 注意：此时不设置 rgSocketInit = true
     }
     logOutputDebugConsoleCharString("Init: listen success");
@@ -202,7 +189,7 @@ void listenSocketServer(SocketClientCallback callback)
     logOutputDebugConsoleCharString("Listen: start listen socket server");
 
     // 检查服务器是否已启动
-    if (rgSocketServerFd < 0 || !rgSocketInit)
+    if (!netSocketValid(rgSocketServerFd) || !rgSocketInit)
     {
         logOutputErrorConsoleCharString("Listen: server not started yet");
         return;
@@ -217,22 +204,19 @@ void listenSocketServer(SocketClientCallback callback)
     {
         if (gConfigSocketAcceptTimeoutMs > 0)
         {
-            struct timeval tv;
-            tv.tv_sec = gConfigSocketAcceptTimeoutMs / 1000;
-            tv.tv_usec = (gConfigSocketAcceptTimeoutMs % 1000) * 1000;
-
-            if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
+            if (netSetSendTimeoutMs(rgSocketServerFd, gConfigSocketAcceptTimeoutMs) < 0)
             {
-                perror("Listen: setsockopt SO_SNDTIMEO");
-                close(rgSocketServerFd);
-                rgSocketServerFd = -1;
+                logOutputErrorConsoleCharString("Listen: set listen socket send timeout failed");
+                netSocketClose(rgSocketServerFd);
+                rgSocketServerFd = SOCKET_INVALID;
                 return;
             }
-            if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+
+            if (netSetRecvTimeoutMs(rgSocketServerFd, gConfigSocketAcceptTimeoutMs) < 0)
             {
-                perror("Listen: setsockopt SO_RCVTIMEO");
-                close(rgSocketServerFd);
-                rgSocketServerFd = -1;
+                logOutputErrorConsoleCharString("Listen: set listen socket recv timeout failed");
+                netSocketClose(rgSocketServerFd);
+                rgSocketServerFd = SOCKET_INVALID;
                 return;
             }
         }
@@ -251,39 +235,41 @@ void closeSocketServer()
 {
     rgSocketServerRun = false;
     logOutputDebugConsoleCharString("Close: socket server");
-    shutdown(rgSocketServerFd, SHUT_RDWR);
-    close(rgSocketServerFd);
+    // shutdown 用于唤醒阻塞在 accept() 上的线程，单独 close 不可靠
+    netShutdownBoth(rgSocketServerFd);
+    netSocketClose(rgSocketServerFd);
+    rgSocketServerFd = SOCKET_INVALID;
 }
 
-int connectSocketServer(SocketClientInfo *clientInfo, const char *host, int port)
+SOCKET_T connectSocketServer(SocketClientInfo *clientInfo, const char *host, int port)
 {
     logOutputDebugConsoleCharString("Connect: start connect to socket server");
 
     if (clientInfo == NULL)
     {
         logOutputErrorConsoleCharString("Connect: client info is null");
-        return -1;
+        return SOCKET_INVALID;
     }
     if (host == NULL || host[0] == '\0')
     {
         logOutputErrorConsoleCharString("Connect: client host is null or empty");
-        return -1;
+        return SOCKET_INVALID;
     }
     if (port <= 0 || port > 65535)
     {
         char err[128];
         snprintf(err, sizeof(err), "Connect: invalid port %d", port);
         logOutputErrorConsoleCharString(err);
-        return -1;
+        return SOCKET_INVALID;
     }
 
-    int sockFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockFd < 0)
+    SOCKET_T sockFd = socket(AF_INET, SOCK_STREAM, 0);
+    if (!netSocketValid(sockFd))
     {
         char errorMsg[256];
-        snprintf(errorMsg, sizeof(errorMsg), "Connect: socket() failed - %s", strerror(errno));
+        snprintf(errorMsg, sizeof(errorMsg), "Connect: socket() failed - %s", netErrorString(netLastError()));
         logOutputErrorConsoleCharString(errorMsg);
-        return -1;
+        return SOCKET_INVALID;
     }
     logOutputDebugConsoleCharString("Connect: socket() success");
 
@@ -291,61 +277,62 @@ int connectSocketServer(SocketClientInfo *clientInfo, const char *host, int port
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(port);
+    serverAddr.sin_port = htons((u_short)port);
 
     if (strcmp(host, "0.0.0.0") == 0 || strcmp(host, "*") == 0)
     {
-        serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        logOutputDebugConsoleCharString("Connect: connecting to 0.0.0.0 (any)");
+        // connect 语义上 0.0.0.0 就是本机回环，所以这里要填 LOOPBACK 而不是 INADDR_ANY。
+        // Linux 内核会把 connect 到 0.0.0.0 按 127.0.0.1 处理；Windows 不认，
+        // 会直接返回 WSAEADDRNOTAVAIL（"请求的地址无效"）。这里显式填 127.0.0.1 让两边一致。
+        // 注意：上面 initSocketServer 里的 bind 路径仍然用 INADDR_ANY，那是"监听所有网卡"，不要一起改。
+        serverAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        logOutputDebugConsoleCharString("Connect: connecting to 0.0.0.0, treated as localhost");
     }
     else if (strcmp(host, "127.0.0.1") == 0 || strcmp(host, "localhost") == 0)
     {
         serverAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         logOutputDebugConsoleCharString("Connect: connecting to localhost");
     }
-    else
+    else if (!netResolveIpv4(host, &serverAddr))
     {
-        if (inet_pton(AF_INET, host, &serverAddr.sin_addr) <= 0)
-        {
-            struct hostent *hostent = gethostbyname(host);
-            if (hostent == NULL)
-            {
-                char err[256];
-                snprintf(err, sizeof(err), "Connect: cannot resolve hostname '%s'", host);
-                logOutputErrorConsoleCharString(err);
-                close(sockFd);
-                return -1;
-            }
-            memcpy(&serverAddr.sin_addr, hostent->h_addr_list[0], hostent->h_length);
-            logOutputDebugConsoleCharString("Connect: hostname resolved");
-        }
+        char err[256];
+        snprintf(err, sizeof(err), "Connect: cannot resolve hostname '%s'", host);
+        logOutputErrorConsoleCharString(err);
+        netSocketClose(sockFd);
+        return SOCKET_INVALID;
     }
 
     char ipStr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &serverAddr.sin_addr, ipStr, sizeof(ipStr));
     char msg[256];
-    snprintf(msg, sizeof(msg), "Connect: target IP %s, port %d", ipStr, port);
+    // 端口从 serverAddr 里取，不打印 port 变量：否则实际结构体里的端口被改错了也看不出来
+    snprintf(msg, sizeof(msg), "Connect: target IP %s, port %d", ipStr, ntohs(serverAddr.sin_port));
     logOutputDebugConsoleCharString(msg);
 
-    if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
+    if (gConfigSocketIoUseMode != CONNECT_USE_IO_NONE)
+    {
+        logOutputErrorConsoleCharString("Connect: socket ioUseMode is not supported yet, only 'none' is implemented");
+        netSocketClose(sockFd);
+        return SOCKET_INVALID;
+    }
+
+    // 走到这里 ioUseMode 必然是 none（上面已拦截），整段是阻塞模式实现
     {
         if (gConfigSocketConnectTimeoutMs > 0)
         {
             // 阻塞模式下设置收发超时
-            struct timeval tv;
-            tv.tv_sec = gConfigSocketConnectTimeoutMs / 1000;
-            tv.tv_usec = (gConfigSocketConnectTimeoutMs % 1000) * 1000;
-            if (setsockopt(sockFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
+            if (netSetSendTimeoutMs(sockFd, gConfigSocketConnectTimeoutMs) < 0)
             {
-                perror("Connect: setsockopt SO_SNDTIMEO");
-                close(sockFd);
-                return -1;
+                logOutputErrorConsoleCharString("Connect: set socket send timeout failed");
+                netSocketClose(sockFd);
+                return SOCKET_INVALID;
             }
-            if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+
+            if (netSetRecvTimeoutMs(sockFd, gConfigSocketConnectTimeoutMs) < 0)
             {
-                perror("Connect: setsockopt SO_RCVTIMEO");
-                close(sockFd);
-                return -1;
+                logOutputErrorConsoleCharString("Connect: set socket recv timeout failed");
+                netSocketClose(sockFd);
+                return SOCKET_INVALID;
             }
             logOutputDebugConsoleCharString("Connect: set socket timeout");
         }
@@ -360,7 +347,7 @@ int connectSocketServer(SocketClientInfo *clientInfo, const char *host, int port
                 logOutputDebugConsoleCharString("Connect: connection established immediately");
                 break;
             }
-            else if (errno == EINPROGRESS)
+            else if (netIsInProgress(netLastError()))
             {
                 continue;
             }
@@ -373,37 +360,31 @@ int connectSocketServer(SocketClientInfo *clientInfo, const char *host, int port
         if (isBreak)
         {
             char errMsg[256];
-            snprintf(errMsg, sizeof(errMsg), "Connect: connect() failed - %s", strerror(errno));
+            snprintf(errMsg, sizeof(errMsg), "Connect: connect() failed - %s", netErrorString(netLastError()));
             logOutputErrorConsoleCharString(errMsg);
-            close(sockFd);
-            return -1;
+            netSocketClose(sockFd);
+            return SOCKET_INVALID;
         }
-    }
-    else
-    {
-        logOutputErrorConsoleCharString("Connect: socket ioUseMode is not supported yet, only 'none' is implemented");
-        close(sockFd);
-        return -1;
     }
 
     // 获取本地地址信息
     struct sockaddr_in localAddr;
-    socklen_t localLen = sizeof(localAddr);
+    NET_SOCKLEN_T localLen = sizeof(localAddr);
     if (getsockname(sockFd, (struct sockaddr *)&localAddr, &localLen) < 0)
     {
         logOutputErrorConsoleCharString("Connect: getsockname failed");
-        close(sockFd);
-        return -1;
+        netSocketClose(sockFd);
+        return SOCKET_INVALID;
     }
 
     // 获取对端地址信息（可选）
     struct sockaddr_in peerAddr;
-    socklen_t peerLen = sizeof(peerAddr);
+    NET_SOCKLEN_T peerLen = sizeof(peerAddr);
     if (getpeername(sockFd, (struct sockaddr *)&peerAddr, &peerLen) < 0)
     {
         logOutputErrorConsoleCharString("Connect: getpeername failed");
-        close(sockFd);
-        return -1;
+        netSocketClose(sockFd);
+        return SOCKET_INVALID;
     }
 
     // 填充 SocketClientInfo

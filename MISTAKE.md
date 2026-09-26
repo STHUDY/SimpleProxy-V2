@@ -96,7 +96,8 @@ CMake 当前实际添加的是 `src` 加全部 5 个子目录（`Callback` / `Gl
 以下都是核实过、当前仍然存在的：
 
 - **`config.c` 的默认值全是死值**：`main.cpp` 对每个键都会 `as<T>(default)`，`config.c` 的初始值一律被覆盖，但两者并不一致 —— `gConfigThreadpoolMaxWorkers` 10 vs 15、`gConfigSocketPollingIntervalMs` 100 vs 500、`gConfigThreadpoolPollingIntervalMs` 1000 vs 500、`gServerSocketMaxBacklog` 5 vs 128、`gServerSocketBufferSize` / `gClientSocketBufferSize` 1024 vs 8192、`gConfigTlsUseThreadpoolSslConnect` false vs true。**读 `config.c` 推断运行时行为会得到错误答案，改默认值只改 `config.c` 不生效。**
-- **死配置**（解析了但代码里从未读取，已逐个确认非 config 文件中零引用）：`config.socket.noBlockReadOrWrite`、`config.socket.noBlockConnect`、`config.tls.noBlockReadOrWrite`、`config.tls.noBlockConnect`、`client.tls.hostname`、`client.tls.cert`。
-- **交叉使用**：`config.socket.pollingIntervalMs` 只被 TLS 转发路径读取（`TlsCallback.cpp:425`，写阻塞时 `select()` 的超时）；明文路径两个 `pollingIntervalMs` 都不读。
+- **死配置**（解析了但代码里从未读取，已逐个确认非 config 文件中零引用）：`config.socket.noBlockReadOrWrite`、`config.socket.noBlockConnect`、`config.tls.noBlockReadOrWrite`、`config.tls.noBlockConnect`、`client.tls.hostname`。
+- **`client.tls.cert` 已从死配置变成生效配置**：原本只被解析、代码里从不读取。跨平台改造时补上了 `SSL_CTX_load_verify_locations()`，现在能真正指定后端 CA 文件（追加语义）。自签 / 内网 CA 的后端此前无法使用。
+- **交叉使用**：`config.socket.pollingIntervalMs` 只被 TLS 转发路径读取（`TlsCallback.cpp:438`，写阻塞时 `netWaitSetWait` 的超时）；明文路径两个 `pollingIntervalMs` 都不读。（`config.tls.pollingIntervalMs` 另在 `TlsCallback.cpp:360,365` 读取。）
 - **从未使用的成员**：`CallbackShareInfo::timeout`（`CallbackBase.hpp:9`，只在 `SocketCallback.cpp:49` 赋 0）、`rgSslAcceptTimeoutMs`（`config.c:58`，零引用）、`ThreadpoolAutoCtrlByTime::thread_pool_simple` / `mission_dorp_callback`（各只有声明那一处）、`submit_count`（只有声明和 `submit_count++`，无人读）。
 - **重复符号**：`logOutputFatalConsole(const char*)` 在 `Log.c:59`（C 链接）和 `Log.cpp:67`（C++ 链接）各有一份实现，`Log.hpp:4` 声明了 C++ 版而 `Log.h` 没有声明 C 版。目前没有 `.c` 文件调用它，所以没暴露 —— 从 C 代码里调它会得到隐式声明。

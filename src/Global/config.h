@@ -3,6 +3,15 @@
 
 #include "headfile.h"
 
+// 这里的全局量定义在 config.c（C 编译），却被 main.cpp / SocketCallback.cpp /
+// TlsCallback.cpp 这些 C++ 文件读写，所以必须声明成 C 链接。
+// GCC/Clang 的 Itanium ABI 不对全局命名空间的变量做 mangle，所以缺 extern "C"
+// 在 Linux 上照样能链接；MSVC 会 mangle 每一个全局量，缺了就全是 LNK2001。
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 extern int gConfigSocketIoUseMode;
 extern bool gConfigSocketUseThreadpoolAccept;
 extern bool gConfigSocketNoBlockReadOrWrite;
@@ -54,19 +63,23 @@ extern char *gClientTlsCertFileChar;
 // 运行时变量
 extern bool rgSocketInit;
 extern bool rgSocketServerRun;
-extern int rgSocketServerFd;
+extern SOCKET_T rgSocketServerFd;
 extern struct sockaddr_in rgSocketServerAddr;
 
 extern bool rgTlsInit;
 extern bool rgTlsServerRun;
 extern int rgSslAcceptTimeoutMs;
-extern int rgTlsSocketServerFd;
+extern SOCKET_T rgTlsSocketServerFd;
 extern struct sockaddr_in rgTlsServerAddr;
 
-extern pthread_mutex_t rgLogWriteFileMutex;
-extern pthread_mutex_t rgLogOutputMutex;
+extern NET_MUTEX_T rgLogWriteFileMutex;
+extern NET_MUTEX_T rgLogOutputMutex;
 extern FILE *rgLogFileOpen;
 
 extern int rgConnectIndex;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

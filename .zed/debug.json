@@ -1,0 +1,45 @@
+[
+  {
+    "label": "cmake configure",
+    "build": {
+      "command": "cmake",
+      "args": ["-S", ".", "-B", "build"],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake rebuild configure",
+    "build": {
+      "command": "sh",
+      "args": ["-c", "rm -rf build && cmake -S . -B build"],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake build native binary (Debug)",
+    "build": {
+      "command": "cmake",
+      "args": ["--build", "build", "-j"],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+  },
+  {
+    "label": "cmake run native binary (Debug) test SockToSock",
+    "build": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "rm -rf build && cmake -S . -B build && cmake --build build -j",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "program": "$ZED_WORKTREE_ROOT/build/SimpleProxy",
+    "args": ["-c", "$ZED_WORKTREE_ROOT/test/SockToSock/config.sock.yml"],
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+]

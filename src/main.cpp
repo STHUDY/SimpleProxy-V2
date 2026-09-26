@@ -53,9 +53,31 @@ int chooseLogLevel(std::string logLevelString)
     return LOG_LEVEL_DEBUG;
 }
 
+// 把 yaml-cpp 读到的字符串配置归一成"真正为空"。
+//
+// yaml-cpp 的 as<std::string>(fallback) 对 null 节点（YAML 里写成裸键 `sni:`）
+// 返回的是字面量字符串 "null"，而不是 fallback。所以：
+//   sni:        -> 读成 "null" -> 当成 SNI "null" 发给后端，还强制按 "null" 校验后端证书
+//   sni: ""     -> 读成 ""     -> 正确，触发客户端 SNI 透传
+//   sni: ~      -> 读成 "null"（同上）
+// 这里统一抹平，配置怎么写都不会再触发这个问题。
+// 只处理这些"没填"的形态；真要显式填字符串 "null" 的场景不存在，所以不区分用户意图。
+std::string normalizeConfigString(const std::string &value)
+{
+    if (value.empty() || value == "null" || value == "Null" || value == "NULL" || value == "~")
+    {
+        return "";
+    }
+    return value;
+}
+
 // 设置文件描述符限制
 void setFileDescriptorLimit()
 {
+#if defined(_WIN32)
+    // Windows 没有 RLIMIT_NOFILE 这个概念，套接字句柄上限由系统决定，这里没有可调的东西
+    logOutputInfoConsole("Windows has no RLIMIT_NOFILE, socket handle limit is managed by the system");
+#else
     struct rlimit rl;
     if (getrlimit(RLIMIT_NOFILE, &rl) == 0)
     {
@@ -79,6 +101,27 @@ void setFileDescriptorLimit()
     {
         logOutputErrorConsole("Failed to get file descriptor limit: " + std::string(strerror(errno)));
     }
+#endif
+}
+
+// 安装 SIGINT 处理。Windows 没有 sigaction，退化成 signal。
+void installSigintHandler()
+{
+#if defined(_WIN32)
+    if (signal(SIGINT, SigintHandler) == SIG_ERR)
+    {
+        logOutputWarnConsole("[WARN] signal error but it is not improtant");
+    }
+#else
+    struct sigaction sa;
+    sa.sa_handler = SigintHandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGINT, &sa, NULL) == -1)
+    {
+        logOutputWarnConsole("[WARN] sigaction error but it is not improtant");
+    }
+#endif
 }
 
 void missionDropCallback(std::vector<std::any> args)
@@ -98,16 +141,25 @@ void managerCreateFailCallback(std::string info)
 
 int main(int argc, char *argv[])
 {
-    signal(SIGPIPE, SIG_IGN);
+    // 日志互斥量必须最先初始化：下面每一步都会打日志。
+    // 这两个互斥量以前从来没有显式初始化过，只是 glibc 下全零值恰好是合法的普通互斥量；
+    // Windows 的全零 CRITICAL_SECTION 是非法的，EnterCriticalSection 会直接抛异常。
+    NET_MUTEX_INIT(rgLogOutputMutex);
+    NET_MUTEX_INIT(rgLogWriteFileMutex);
 
-    struct sigaction sa;
-    sa.sa_handler = SigintHandler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    if (sigaction(SIGINT, &sa, NULL) == -1)
+    // Windows 的 Winsock 必须先 WSAStartup，否则所有 socket 调用返回 WSANOTINITIALISED
+    if (!netWsaStartup())
     {
-        logOutputWarnConsole("[WARN] sigaction error but it is not improtant");
+        logOutputFatalConsole(std::string("WSAStartup failed: ") + netErrorString(netLastError()));
+        return EXIT_FAILURE;
     }
+
+#if !defined(_WIN32)
+    // Windows 的 send 不会触发 SIGPIPE，没有这个信号需要忽略
+    signal(SIGPIPE, SIG_IGN);
+#endif
+
+    installSigintHandler();
 
     // 设置文件描述符限制
     setFileDescriptorLimit();
@@ -190,7 +242,7 @@ int main(int argc, char *argv[])
             gConfigLogEnbaleFile = config["config"]["log"]["file"].as<bool>(false);
             if (gConfigLogEnbaleFile)
             {
-                gConfigLogFilePathString = config["config"]["log"]["filePath"].as<std::string>("");
+                gConfigLogFilePathString = normalizeConfigString(config["config"]["log"]["filePath"].as<std::string>(""));
                 if (gConfigLogFilePathString != "")
                 {
                     std::filesystem::path checkLogPath(gConfigLogFilePathString);
@@ -221,7 +273,7 @@ int main(int argc, char *argv[])
 
         logOutputInfoConsole("load config success to filepath : " + configFile);
 
-        gServerHostString = config["server"]["host"].as<std::string>("");
+        gServerHostString = normalizeConfigString(config["server"]["host"].as<std::string>(""));
         gServerPort = config["server"]["port"].as<int>(0);
         if (gServerHostString == "")
         {
@@ -243,7 +295,7 @@ int main(int argc, char *argv[])
 
         if (gConfigTlsEnbale)
         {
-            gServerTlsCertFileString = config["server"]["tls"]["cert"].as<std::string>("");
+            gServerTlsCertFileString = normalizeConfigString(config["server"]["tls"]["cert"].as<std::string>(""));
             if (gServerTlsCertFileString == "")
             {
                 logOutputErrorConsole("server.tls.cert is empty");
@@ -263,11 +315,11 @@ int main(int argc, char *argv[])
                 }
             }
             // 规范键是 privkey；同时兼容旧配置里写的 key，避免升级后私钥读不到
-            std::string privkeyValue = config["server"]["tls"]["privkey"].as<std::string>("");
+            std::string privkeyValue = normalizeConfigString(config["server"]["tls"]["privkey"].as<std::string>(""));
             std::string privkeyKeyName = "server.tls.privkey";
             if (privkeyValue == "")
             {
-                std::string legacyKeyValue = config["server"]["tls"]["key"].as<std::string>("");
+                std::string legacyKeyValue = normalizeConfigString(config["server"]["tls"]["key"].as<std::string>(""));
                 if (legacyKeyValue != "")
                 {
                     privkeyValue = legacyKeyValue;
@@ -412,22 +464,41 @@ int main(int argc, char *argv[])
 
         gClientSocketBufferSize = config["client"]["socket"]["bufferSize"].as<int>(8192);
 
-        gClientTlsHostNameString = config["client"]["tls"]["hostname"].as<std::string>("");
+        gClientTlsHostNameString = normalizeConfigString(config["client"]["tls"]["hostname"].as<std::string>(""));
         if (gClientTlsHostNameString != "")
         {
             gClientTlsHostNameChar = const_cast<char *>(gClientTlsHostNameString.c_str());
         }
 
-        gClientTlsSniString = config["client"]["tls"]["sni"].as<std::string>("");
+        gClientTlsSniString = normalizeConfigString(config["client"]["tls"]["sni"].as<std::string>(""));
         if (gClientTlsSniString != "")
         {
             gClientTlsSniChar = const_cast<char *>(gClientTlsSniString.c_str());
         }
 
-        gClientTlsCertFileString = config["client"]["tls"]["cert"].as<std::string>("");
+        gClientTlsCertFileString = normalizeConfigString(config["client"]["tls"]["cert"].as<std::string>(""));
         if (gClientTlsCertFileString != "")
         {
-            gClientTlsCertFileChar = const_cast<char *>(gClientTlsCertFileString.c_str());
+            std::filesystem::path checkClientCaPath(gClientTlsCertFileString);
+            if (!std::filesystem::exists(checkClientCaPath))
+            {
+                logOutputErrorConsole("client.tls.cert file not exists: " + gClientTlsCertFileString);
+                gClientTlsCertFileString = "";
+            }
+            else
+            {
+                gClientTlsCertFileChar = const_cast<char *>(gClientTlsCertFileString.c_str());
+                logOutputInfoConsole("client.tls.cert file: " + gClientTlsCertFileString);
+            }
+        }
+
+        if (gConfigTlsEnbale && gClientTlsCertFileString == "")
+        {
+            // SSL_CTX_set_default_verify_paths() 只要"目录存在"就返回成功，
+            // 哪怕里面一张 CA 都没有。Windows 上默认路径经常是空的，
+            // 结果是所有后端握手都以 certificate verify failed 失败，很难排查。
+            // 只在 TLS 模式下提示：明文模式压根没有后端证书校验。
+            logOutputInfoConsole("client.tls.cert is empty: backend certificate verification will only use OpenSSL's default CA locations (SSL_CERT_FILE / OPENSSLDIR). If handshakes fail with 'certificate verify failed', point client.tls.cert at a CA bundle.");
         }
     }
     catch (YAML::Exception &e)
@@ -468,7 +539,7 @@ int main(int argc, char *argv[])
     {
         logOutputInfoConsole("Initializing TLS server mode...");
         initTlsServer();
-        if (rgTlsSocketServerFd < 0)
+        if (!netSocketValid(rgTlsSocketServerFd))
         {
             logOutputErrorConsole("Failed to initialize TLS server socket");
             return EXIT_FAILURE;
@@ -478,7 +549,7 @@ int main(int argc, char *argv[])
     {
         logOutputInfoConsole("Initializing plain socket server mode...");
         initSocketServer();
-        if (rgSocketServerFd < 0)
+        if (!netSocketValid(rgSocketServerFd))
         {
             logOutputErrorConsole("Failed to initialize server socket");
             return EXIT_FAILURE;
@@ -531,6 +602,12 @@ int main(int argc, char *argv[])
         fclose(rgLogFileOpen);
         rgLogFileOpen = NULL;
     }
+
+    // 线程池已经全部退出、监听 fd 已经关闭，这时才安全释放 Winsock
+    netWsaCleanup();
+
+    NET_MUTEX_DESTROY(rgLogWriteFileMutex);
+    NET_MUTEX_DESTROY(rgLogOutputMutex);
 
     return EXIT_SUCCESS;
 }

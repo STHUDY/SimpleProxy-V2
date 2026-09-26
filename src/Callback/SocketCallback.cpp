@@ -7,8 +7,8 @@ static void socketCreateProxyMission(SocketClientInfo *aConnectInfo, SocketClien
     if (!isIpAllowed(aConnectInfo->ip_str))
     {
         logOutputErrorConsole("SECURITY: Access denied - IP '" + std::string(aConnectInfo->ip_str) + "' is blocked by firewall rules");
-        shutdown(aConnectInfo->fd, SHUT_RDWR);
-        close(aConnectInfo->fd);
+        netShutdownBoth(aConnectInfo->fd);
+        netSocketClose(aConnectInfo->fd);
 
         delete aConnectInfo;
         delete bConnectInfo;
@@ -19,21 +19,21 @@ static void socketCreateProxyMission(SocketClientInfo *aConnectInfo, SocketClien
     if (!selectBackendTarget(backend))
     {
         logOutputErrorConsole("No backend available for client " + clientAddr);
-        shutdown(aConnectInfo->fd, SHUT_RDWR);
-        close(aConnectInfo->fd);
+        netShutdownBoth(aConnectInfo->fd);
+        netSocketClose(aConnectInfo->fd);
 
         delete aConnectInfo;
         delete bConnectInfo;
         return;
     }
 
-    if (connectSocketServer(bConnectInfo, backend.host.c_str(), backend.port) < 0)
+    if (!netSocketValid(connectSocketServer(bConnectInfo, backend.host.c_str(), backend.port)))
     {
         logOutputErrorConsole("Failed to establish backend connection for client " + clientAddr);
-        if (aConnectInfo->fd >= 0)
+        if (netSocketValid(aConnectInfo->fd))
         {
-            shutdown(aConnectInfo->fd, SHUT_RDWR);
-            close(aConnectInfo->fd);
+            netShutdownBoth(aConnectInfo->fd);
+            netSocketClose(aConnectInfo->fd);
         }
 
         delete aConnectInfo;
@@ -54,7 +54,7 @@ static void socketCreateProxyMission(SocketClientInfo *aConnectInfo, SocketClien
     rgThreadPool.pushMission(socketProxyWorkerSingle, bConnectInfo, aConnectInfo, gServerSocketBufferSize, shareInfo, std::string("server -> proxy -> client "));
 }
 
-void socketServerCallback(int fd, SocketClientInfo *socketClientInfo)
+void socketServerCallback(SocketClientInfo *socketClientInfo)
 {
 
     // 必须CopySocketClientInfo
@@ -79,9 +79,16 @@ void socketListenerCallback()
 void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *bConnectInfo, size_t bufferSize, CallbackShareInfo *shareInfo, std::string headText)
 {
     std::mutex *mutex = shareInfo->mutex;
-    int aSocket = aConnectInfo->fd;
-    int bSocket = bConnectInfo->fd;
-    char *buffer = new (std::align_val_t(64)) char[bufferSize];
+    SOCKET_T aSocket = aConnectInfo->fd;
+    SOCKET_T bSocket = bConnectInfo->fd;
+    char *buffer = (char *)netAlignedAlloc(bufferSize, 64);
+    if (buffer == nullptr)
+    {
+        // 分配失败不能提前 return：另一个方向的 worker 还在等 shareInfo->close 变化，
+        // 直接退出会让它一直挂在 recv 上。照常走下面的退出协议即可，
+        // 只是不做任何转发。
+        logOutputErrorConsole("Socket proxy worker stopped - failed to allocate " + std::to_string(bufferSize) + " bytes transfer buffer");
+    }
 
     std::unique_lock<std::mutex> ulock(*mutex);
 
@@ -94,13 +101,10 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
 
             if (gConfigSocketReadOrWriteTimeoutMs > 0)
             {
-                struct timeval tv;
-                tv.tv_sec = gConfigSocketReadOrWriteTimeoutMs / 1000;
-                tv.tv_usec = (gConfigSocketReadOrWriteTimeoutMs % 1000) * 1000;
-                setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-                setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-                setsockopt(bSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-                setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+                netSetRecvTimeoutMs(aSocket, gConfigSocketReadOrWriteTimeoutMs);
+                netSetSendTimeoutMs(aSocket, gConfigSocketReadOrWriteTimeoutMs);
+                netSetRecvTimeoutMs(bSocket, gConfigSocketReadOrWriteTimeoutMs);
+                netSetSendTimeoutMs(bSocket, gConfigSocketReadOrWriteTimeoutMs);
             }
         }
 
@@ -110,7 +114,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
 
     ulock.unlock();
 
-    if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
+    if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE && buffer != nullptr)
     {
         bool isBreak = false;
         while (rgSocketServerRun)
@@ -123,11 +127,12 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
             }
 
             logOutputDebugConsole(headText + "Waiting for data from " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
-            ssize_t recvLen = recv(aSocket, buffer, bufferSize, MSG_NOSIGNAL);
+            NET_SSIZE_T recvLen = recv(aSocket, buffer, bufferSize, SOCKET_SEND_FLAGS);
             if (recvLen < 0)
             {
-                logOutputDebugConsole("recv error: " + std::string(strerror(errno)) + " - " + std::to_string(errno));
-                if (errno == EAGAIN || errno == EWOULDBLOCK)
+                int recvErr = netLastError();
+                logOutputDebugConsole("recv error: " + std::string(netErrorString(recvErr)) + " - " + std::to_string(recvErr));
+                if (netIsWouldBlock(recvErr))
                 {
                     if (shareInfo->close == true)
                     {
@@ -143,7 +148,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                     }
                     continue;
                 }
-                else if (errno == EINTR)
+                else if (netIsInterrupted(recvErr))
                 {
                     continue;
                 }
@@ -157,13 +162,14 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
             }
 
             logOutputDebugConsole(headText + "Read " + std::to_string(recvLen) + " bytes from " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
-            ssize_t sentTotal = 0;
+            NET_SSIZE_T sentTotal = 0;
             while (sentTotal < recvLen)
             {
-                ssize_t sentLen = send(bSocket, buffer + sentTotal, recvLen - sentTotal, MSG_NOSIGNAL);
+                NET_SSIZE_T sentLen = send(bSocket, buffer + sentTotal, (int)(recvLen - sentTotal), SOCKET_SEND_FLAGS);
                 if (sentLen < 0)
                 {
-                    if (errno == EAGAIN || errno == EWOULDBLOCK)
+                    int sendErr = netLastError();
+                    if (netIsWouldBlock(sendErr))
                     {
                         if (shareInfo->close == true)
                         {
@@ -179,7 +185,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
                         }
                         continue;
                     }
-                    else if (errno == EINTR)
+                    else if (netIsInterrupted(sendErr))
                     {
                         continue;
                     }
@@ -202,16 +208,16 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
         }
     }
 
-    operator delete[](buffer, std::align_val_t(64));
+    netAlignedFree(buffer);
 
     ulock.lock();
     if (shareInfo->close == true)
     {
         logOutputInfoConsole("Socket proxy worker stopped");
-        shutdown(aSocket, SHUT_RDWR);
-        shutdown(bSocket, SHUT_RDWR);
-        close(aSocket);
-        close(bSocket);
+        netShutdownBoth(aSocket);
+        netShutdownBoth(bSocket);
+        netSocketClose(aSocket);
+        netSocketClose(bSocket);
         delete aConnectInfo;
         delete bConnectInfo;
         delete shareInfo;

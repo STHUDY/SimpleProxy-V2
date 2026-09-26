@@ -50,17 +50,17 @@ char *gClientTlsCertFileChar = NULL;
 // 运行时变量
 bool rgSocketInit = false;
 bool rgSocketServerRun = false;
-int rgSocketServerFd = -1;
+SOCKET_T rgSocketServerFd = SOCKET_INVALID;
 struct sockaddr_in rgSocketServerAddr;
 
 bool rgTlsInit = false;
 bool rgTlsServerRun = false;
 int rgSslAcceptTimeoutMs = -1;
-int rgTlsSocketServerFd = -1;
+SOCKET_T rgTlsSocketServerFd = SOCKET_INVALID;
 struct sockaddr_in rgTlsServerAddr;
 
-pthread_mutex_t rgLogWriteFileMutex;
-pthread_mutex_t rgLogOutputMutex;
+NET_MUTEX_T rgLogWriteFileMutex;
+NET_MUTEX_T rgLogOutputMutex;
 FILE *rgLogFileOpen = NULL;
 
 int rgConnectIndex = 0;

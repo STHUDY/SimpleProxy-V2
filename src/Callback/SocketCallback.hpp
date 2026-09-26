@@ -5,7 +5,7 @@
 typedef struct CallbackShareInfo CallbackShareInfo;
 typedef struct SocketClientInfo SocketClientInfo;
 
-void socketServerCallback(int fd, SocketClientInfo *socketClientInfo);
+void socketServerCallback(SocketClientInfo *socketClientInfo);
 
 void socketListenerCallback();
 

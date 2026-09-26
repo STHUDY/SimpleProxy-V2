@@ -1,11 +1,36 @@
 CompileFlags:
-  # 需要 CMakeLists.txt 里 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) 才会生成
-  # build/compile_commands.json，否则这一行不生效
+  # 这里指向的 build/compile_commands.json 在 Windows 上【不会生成】：
+  # CMakeLists.txt:15 有 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)，但 Visual Studio
+  # 生成器忽略这个属性（只有 Ninja / Makefile 系列生成器才产出）。
+  # 换句话说下面这份 Add 列表不是"锦上添花的补充"，而是 Windows 上 clangd
+  # 唯一的 include 来源 —— 少一条就等于那一整个目录的头全部解析失败。
   CompilationDatabase: build/
+
+  # 必须和 CMakeLists.txt:73-80 的 include_directories 展开结果逐条一致。
+  # 那里的 file(GLOB_RECURSE src/*) 对每个匹配项取 DIRECTORY 再加进去，
+  # 所以凡是有文件的目录都会进 include 路径（含 Platform 下的两层）。
+  # 增删 src/ 子目录时两边同步；clangd 的 Add 不支持 glob，只能逐条列。
+  #
+  # Platform/Linux 与 Platform/Windows 【同时】列出，与构建保持一致：
+  # 两边文件名不重叠，且 headfile.h:56 按 _WIN32 分支只包含当前平台那一份。
   Add:
     - "-Isrc"
     - "-Isrc/Callback"
     - "-Isrc/Global"
     - "-Isrc/Log"
+    - "-Isrc/Platform"
+    - "-Isrc/Platform/Linux"
+    - "-Isrc/Platform/Windows"
     - "-Isrc/ProtocolServer"
     - "-Isrc/Threadpool"
+
+# 【刻意的取舍】没有加 CMakeLists.txt:92 那几个 -D（WIN32_LEAN_AND_MEAN /
+# NOMINMAX / _CRT_SECURE_NO_WARNINGS / _WIN32_WINNT=0x0601）：
+#   1) clangd 的 AddFor 按【文件名 / 目录 / 语言 / 编译器名】匹配，没有
+#      "windows" 这种按目标系统匹配的键。写 -D 到 Add 里能生效，但 .clangd
+#      是入库文件，会连带污染 Linux 上用 clangd 的人。
+#   2) 真正会"报错"的是头找不到，不是宏缺失，所以下面那份 -I 列表才是
+#      必须精确对齐 CMakeLists 的那条。宏只影响 windows.h 的解析细节，
+#      属于诊断噪音，不属于解析失败。
+#   若确实需要，可在确认本机 clangd 识别出的驱动名（clang-cl / msvc）后
+#   改成 AddFor: - <驱动名>: [-D...]，不要凭猜写 "windows"。
