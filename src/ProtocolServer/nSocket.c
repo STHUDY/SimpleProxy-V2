@@ -213,7 +213,7 @@ void listenSocketServer(SocketClientCallback callback)
         return;
     }
 
-    if (gConfigSocketIoUseMode != CONNECT_USE_IO_NONE)
+    if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
         if (gConfigSocketAcceptTimeoutMs > 0)
         {
