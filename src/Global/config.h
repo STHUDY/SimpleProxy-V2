@@ -46,7 +46,6 @@ extern char *gServerTlsKeyFileChar;
 extern char *gClientHostChar;
 extern int gClientPort;
 extern int gClientSelectMode;  // 0=roundRobin, 1=random
-extern int gClientRoundRobinIndex;
 extern int gClientSocketBufferSize;
 extern char *gClientTlsHostNameChar;
 extern char *gClientTlsSniChar;
@@ -67,5 +66,7 @@ extern struct sockaddr_in rgTlsServerAddr;
 extern pthread_mutex_t rgLogWriteFileMutex;
 extern pthread_mutex_t rgLogOutputMutex;
 extern FILE *rgLogFileOpen;
+
+extern int rgConnectIndex;
 
 #endif

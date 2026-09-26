@@ -62,3 +62,5 @@ struct sockaddr_in rgTlsServerAddr;
 pthread_mutex_t rgLogWriteFileMutex;
 pthread_mutex_t rgLogOutputMutex;
 FILE *rgLogFileOpen = NULL;
+
+int rgConnectIndex = 0;

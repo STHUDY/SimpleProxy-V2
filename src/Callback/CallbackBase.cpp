@@ -35,19 +35,33 @@ bool selectBackendTarget(BackendTarget &target)
     size_t selectedIndex = 0;
     size_t listSize = gClientHostList.size();
 
-    if (listSize == 1)
+    if (listSize == 0)
     {
-        selectedIndex = 0;
+        return false;
     }
-    else if (gClientSelectMode == CLIENT_SELECT_RANDOM) // random
+    else if (listSize == 1)
     {
+        target.host = gClientHostList[selectedIndex];
+        target.port = gClientPortList[selectedIndex];
+        return true;
+    }
+
+    if (gClientSelectMode == CLIENT_SELECT_RANDOM) // random
+    {
+        std::lock_guard<std::mutex> lock(gClientRoundRobinMutex);
         selectedIndex = rand() % listSize;
+        // 尽量避开上一次用过的索引；listSize 为 1 时不避开，避免死循环
+        if (listSize > 1 && selectedIndex == rgConnectIndex)
+        {
+            selectedIndex = (selectedIndex + 1) % listSize;
+        }
+        rgConnectIndex = selectedIndex;
     }
     else // roundRobin (default)
     {
         std::lock_guard<std::mutex> lock(gClientRoundRobinMutex);
-        selectedIndex = gClientRoundRobinIndex;
-        gClientRoundRobinIndex = (gClientRoundRobinIndex + 1) % listSize;
+        selectedIndex = rgConnectIndex % listSize;
+        rgConnectIndex = (selectedIndex + 1) % listSize;
     }
 
     // 结果写进调用方持有的对象：每个 worker 各有自己的 target，

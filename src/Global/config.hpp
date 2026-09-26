@@ -12,7 +12,6 @@ extern std::vector<std::string> gServerConnectBanIpsList;
 extern std::vector<std::string> gClientHostList;
 extern std::vector<int> gClientPortList;
 extern int gClientSelectMode;  // 0=roundRobin, 1=random
-extern int gClientRoundRobinIndex;
 extern std::mutex gClientRoundRobinMutex;
 
 extern std::string gClientTlsHostNameString;
