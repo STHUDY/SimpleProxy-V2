@@ -1,8 +1,8 @@
 #include "nTls.h" // 根据实际情况包含头文件
-SSL_CTX *createContext(bool isServer)
+SSL_CTX* createContext(bool isServer)
 {
-    const SSL_METHOD *method;
-    SSL_CTX *ctx = NULL;
+    const SSL_METHOD* method;
+    SSL_CTX* ctx = NULL;
 
     if (isServer)
         method = TLS_server_method();
@@ -19,7 +19,7 @@ SSL_CTX *createContext(bool isServer)
     return ctx;
 }
 
-bool configureServerContext(SSL_CTX *ctx)
+bool configureServerContext(SSL_CTX* ctx)
 {
     if (SSL_CTX_use_certificate_chain_file(ctx, gServerTlsCertFileChar) <= 0)
     {
@@ -37,7 +37,7 @@ bool configureServerContext(SSL_CTX *ctx)
     return true;
 }
 
-bool configureClientContext(SSL_CTX *ctx)
+bool configureClientContext(SSL_CTX* ctx)
 {
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
 
@@ -49,7 +49,8 @@ bool configureClientContext(SSL_CTX *ctx)
     {
         // 拿不到信任库时 SSL_VERIFY_PEER 会让所有后端握手失败，
         // 与其让失败原因淹没在握手错误里，不如直接拒绝建连。
-        logOutputErrorConsoleCharString("Error: Unable to load system certificate trust store, refusing to connect to backend without certificate verification");
+        logOutputErrorConsoleCharString("Error: Unable to load system certificate trust store, refusing to connect to "
+                                        "backend without certificate verification");
         return false;
     }
 
@@ -65,9 +66,8 @@ bool configureClientContext(SSL_CTX *ctx)
             unsigned long e = ERR_get_error();
             char errBuf[256];
             ERR_error_string_n(e, errBuf, sizeof(errBuf));
-            snprintf(err, sizeof(err),
-                     "Error: Unable to load client.tls.cert '%s' - %s",
-                     gClientTlsCertFileChar, errBuf);
+            snprintf(err, sizeof(err), "Error: Unable to load client.tls.cert '%s' - %s", gClientTlsCertFileChar,
+                     errBuf);
             logOutputErrorConsoleCharString(err);
             ERR_print_errors_fp(stderr);
             return false;
@@ -93,7 +93,7 @@ static void listenSocketConnectIoNone(TlsSocketUpgradeCallback socketUpgradeTlsC
     {
         struct sockaddr_in clientAddr;
         NET_SOCKLEN_T clientLen = sizeof(clientAddr);
-        SOCKET_T clientFd = accept(rgTlsSocketServerFd, (struct sockaddr *)&clientAddr, &clientLen);
+        SOCKET_T clientFd = accept(rgTlsSocketServerFd, (struct sockaddr*)&clientAddr, &clientLen);
 
         if (netSocketValid(clientFd))
         {
@@ -138,14 +138,14 @@ static void listenSocketConnectIoNone(TlsSocketUpgradeCallback socketUpgradeTlsC
         else
         {
             char errMsg[256];
-            snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s",
-                     acceptErr, netErrorString(acceptErr));
+            snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s", acceptErr,
+                     netErrorString(acceptErr));
             logOutputErrorConsoleCharString(errMsg);
         }
     }
 }
 
-static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host, int port)
+static int connectTlsSocketServer(SocketClientInfo* clientInfo, const char* host, int port)
 {
     logOutputDebugConsoleCharString("Connect: start connect to socket server");
 
@@ -213,14 +213,7 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
     snprintf(msg, sizeof(msg), "Connect: target IP %s, port %d", ipStr, ntohs(serverAddr.sin_port));
     logOutputDebugConsoleCharString(msg);
 
-    if (gConfigTlsSocketIoUseMode != CONNECT_USE_IO_NONE)
-    {
-        logOutputErrorConsoleCharString("Connect: tls socket ioUseMode is not supported yet, only 'none' is implemented");
-        netSocketClose(sockFd);
-        return -1;
-    }
-
-    // 走到这里 ioUseMode 必然是 none（上面已拦截），整段是阻塞模式实现
+    if (gConfigTlsSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
         if (gConfigTlsConnectTimeoutMs > 0)
         {
@@ -244,7 +237,7 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
         bool isBreak = false;
         while (!isBreak)
         {
-            int connectRet = connect(sockFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+            int connectRet = connect(sockFd, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
             if (connectRet == 0)
             {
                 logOutputDebugConsoleCharString("Connect: connection established immediately");
@@ -269,11 +262,18 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
             return -1;
         }
     }
+    else
+    {
+        logOutputErrorConsoleCharString(
+            "Connect: tls socket ioUseMode is not supported yet, only 'none' is implemented");
+        netSocketClose(sockFd);
+        return -1;
+    }
 
     // 获取本地地址信息
     struct sockaddr_in localAddr;
     NET_SOCKLEN_T localLen = sizeof(localAddr);
-    if (getsockname(sockFd, (struct sockaddr *)&localAddr, &localLen) < 0)
+    if (getsockname(sockFd, (struct sockaddr*)&localAddr, &localLen) < 0)
     {
         logOutputErrorConsoleCharString("Connect: getsockname failed");
         netSocketClose(sockFd);
@@ -283,7 +283,7 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
     // 获取对端地址信息（可选）
     struct sockaddr_in peerAddr;
     NET_SOCKLEN_T peerLen = sizeof(peerAddr);
-    if (getpeername(sockFd, (struct sockaddr *)&peerAddr, &peerLen) < 0)
+    if (getpeername(sockFd, (struct sockaddr*)&peerAddr, &peerLen) < 0)
     {
         logOutputErrorConsoleCharString("Connect: getpeername failed");
         netSocketClose(sockFd);
@@ -305,7 +305,7 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
     return (int)sockFd;
 }
 
-static bool isValidTlsHost(const char *host)
+static bool isValidTlsHost(const char* host)
 {
     return host != NULL && host[0] != '\0' && strcmp(host, "0.0.0.0") != 0 && strcmp(host, "localhost") != 0;
 }
@@ -354,17 +354,19 @@ void initTlsServer()
     if (!netSocketValid(rgTlsSocketServerFd))
     {
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: socket server failed: socket() error - %s", netErrorString(netLastError()));
+        snprintf(error_msg, sizeof(error_msg), "Init: socket server failed: socket() error - %s",
+                 netErrorString(netLastError()));
         logOutputErrorConsoleCharString(error_msg);
         return;
     }
 
     // 设置端口重用
     int opt = 1;
-    if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) < 0)
+    if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt)) < 0)
     {
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: setsockopt(SO_REUSEADDR) failed - %s", netErrorString(netLastError()));
+        snprintf(error_msg, sizeof(error_msg), "Init: setsockopt(SO_REUSEADDR) failed - %s",
+                 netErrorString(netLastError()));
         logOutputErrorConsoleCharString(error_msg);
         netSocketClose(rgTlsSocketServerFd);
         rgTlsSocketServerFd = SOCKET_INVALID;
@@ -406,10 +408,11 @@ void initTlsServer()
 
     // 绑定端口
     rgTlsServerAddr.sin_port = htons((u_short)gServerPort);
-    if (bind(rgTlsSocketServerFd, (struct sockaddr *)&rgTlsServerAddr, sizeof(rgTlsServerAddr)) < 0)
+    if (bind(rgTlsSocketServerFd, (struct sockaddr*)&rgTlsServerAddr, sizeof(rgTlsServerAddr)) < 0)
     {
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: bind(%s:%d) failed - %s", ipStr, gServerPort, netErrorString(netLastError()));
+        snprintf(error_msg, sizeof(error_msg), "Init: bind(%s:%d) failed - %s", ipStr, gServerPort,
+                 netErrorString(netLastError()));
         logOutputErrorConsoleCharString(error_msg);
         netSocketClose(rgTlsSocketServerFd);
         rgTlsSocketServerFd = SOCKET_INVALID;
@@ -456,13 +459,7 @@ void listenTlsServer(TlsSocketUpgradeCallback socketUpgradeTlsCallback, TlsClien
         return;
     }
 
-    if (gConfigTlsSocketIoUseMode != CONNECT_USE_IO_NONE)
-    {
-        logOutputErrorConsoleCharString("Listen tls server have a mistake: tls socket ioUseMode is not supported yet, only 'none' is implemented");
-        return;
-    }
-
-    // 走到这里 ioUseMode 必然是 none（上面已拦截），整段是阻塞模式实现
+    if (gConfigTlsSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
         if (gConfigTlsAcceptTimeoutMs > 0)
         {
@@ -484,6 +481,12 @@ void listenTlsServer(TlsSocketUpgradeCallback socketUpgradeTlsCallback, TlsClien
         }
         listenSocketConnectIoNone(socketUpgradeTlsCallback, tlsCallback);
     }
+    else
+    {
+        logOutputErrorConsoleCharString(
+            "Listen tls server have a mistake: tls socket ioUseMode is not supported yet, only 'none' is implemented");
+        return;
+    }
 }
 
 void closeTlsServer()
@@ -501,7 +504,7 @@ void closeTlsServer()
     logOutputInfoConsoleCharString("TLS Server shut down.");
 }
 
-int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *host, int port)
+int connectTlsServer(TlsClientInfo* clientInfo, const char* sni, const char* host, int port)
 {
     if (!clientInfo)
     {
@@ -518,7 +521,7 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
         return -1;
     }
 
-    SSL_CTX *ctx = createContext(false);
+    SSL_CTX* ctx = createContext(false);
     if (!ctx)
     {
         logOutputErrorConsoleCharString("connectTlsServer: createContext failed");
@@ -533,7 +536,7 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
         return -1;
     }
 
-    SSL *ssl = SSL_new(ctx);
+    SSL* ssl = SSL_new(ctx);
     if (!ssl)
     {
         logOutputErrorConsoleCharString("connectTlsServer: SSL_new failed");
@@ -549,7 +552,8 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
     // 否则主机名校验会在无任何提示的情况下静默失效。
     if (gClientTlsSniChar != NULL && gClientTlsSniChar[0] != '\0' && !isValidTlsHost(gClientTlsSniChar))
     {
-        logOutputWarnConsoleCharString("Warning: client.tls.sni is set to an address that cannot be used as SNI/hostname, backend certificate hostname verification will be disabled");
+        logOutputWarnConsoleCharString("Warning: client.tls.sni is set to an address that cannot be used as "
+                                       "SNI/hostname, backend certificate hostname verification will be disabled");
     }
 
     if (isValidTlsHost(sni))
@@ -558,7 +562,8 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
     }
     else if (gClientTlsSniChar == NULL || gClientTlsSniChar[0] == '\0')
     {
-        logOutputWarnConsoleCharString("Warning: no usable SNI for backend, backend certificate hostname verification will be disabled");
+        logOutputWarnConsoleCharString(
+            "Warning: no usable SNI for backend, backend certificate hostname verification will be disabled");
     }
 
     if (isValidTlsHost(gClientTlsSniChar))
@@ -570,16 +575,7 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
         SSL_set1_host(ssl, sni);
     }
 
-    if (gConfigTlsSocketIoUseMode != CONNECT_USE_IO_NONE)
-    {
-        logOutputErrorConsoleCharString("Connect: tls socket ioUseMode is not supported yet, only 'none' is implemented");
-        SSL_free(ssl);
-        SSL_CTX_free(ctx);
-        netSocketClose(socketInfo.fd);
-        return -1;
-    }
-
-    // 走到这里 ioUseMode 必然是 none（上面已拦截），整段是阻塞握手实现
+    if (gConfigTlsSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
         int sslConnect = 0;
         int sslConnErr = SSL_ERROR_NONE;
@@ -597,7 +593,8 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
             if (sslConnErr == SSL_ERROR_WANT_READ || sslConnErr == SSL_ERROR_WANT_WRITE)
             {
                 char msg[256];
-                snprintf(msg, sizeof(msg), "SSL_connect select error: %s - %d", netErrorString(netLastError()), netLastError());
+                snprintf(msg, sizeof(msg), "SSL_connect select error: %s - %d", netErrorString(netLastError()),
+                         netLastError());
                 logOutputErrorConsoleCharString(msg);
                 break;
             }
@@ -648,6 +645,15 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
             netSocketClose(socketInfo.fd);
             return -1;
         }
+    }
+    else
+    {
+        logOutputErrorConsoleCharString(
+            "Connect: tls socket ioUseMode is not supported yet, only 'none' is implemented");
+        SSL_free(ssl);
+        SSL_CTX_free(ctx);
+        netSocketClose(socketInfo.fd);
+        return -1;
     }
 
     clientInfo->fd = socketInfo.fd;

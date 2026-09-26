@@ -1,14 +1,10 @@
 {
   "languages": {
     "C": {
-      "language_servers": ["clangd"],
-      "format_on_save": "on",
-      "tab_size": 4
+      "language_servers": ["clangd"]
     },
     "C++": {
-      "language_servers": ["clangd"],
-      "format_on_save": "on",
-      "tab_size": 4
+      "language_servers": ["clangd"]
     }
   },
   "lsp": {

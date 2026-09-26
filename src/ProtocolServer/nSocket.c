@@ -14,7 +14,7 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
     {
         struct sockaddr_in clientAddr;
         NET_SOCKLEN_T clientLen = sizeof(clientAddr);
-        SOCKET_T clientFd = accept(rgSocketServerFd, (struct sockaddr *)&clientAddr, &clientLen);
+        SOCKET_T clientFd = accept(rgSocketServerFd, (struct sockaddr*)&clientAddr, &clientLen);
 
         if (netSocketValid(clientFd))
         {
@@ -58,8 +58,8 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
         else
         {
             char errMsg[256];
-            snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s",
-                     acceptErr, netErrorString(acceptErr));
+            snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s", acceptErr,
+                     netErrorString(acceptErr));
             logOutputErrorConsoleCharString(errMsg);
         }
     }
@@ -112,10 +112,11 @@ void initSocketServer()
 
     // 设置端口重用
     int opt = 1;
-    if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) < 0)
+    if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt)) < 0)
     {
         char errorMsg[256];
-        snprintf(errorMsg, sizeof(errorMsg), "Init: setsockopt(SO_REUSEADDR) failed - %s", netErrorString(netLastError()));
+        snprintf(errorMsg, sizeof(errorMsg), "Init: setsockopt(SO_REUSEADDR) failed - %s",
+                 netErrorString(netLastError()));
         logOutputErrorConsoleCharString(errorMsg);
         netSocketClose(rgSocketServerFd);
         rgSocketServerFd = SOCKET_INVALID;
@@ -157,10 +158,11 @@ void initSocketServer()
 
     // 绑定端口
     rgSocketServerAddr.sin_port = htons((u_short)gServerPort);
-    if (bind(rgSocketServerFd, (struct sockaddr *)&rgSocketServerAddr, sizeof(rgSocketServerAddr)) < 0)
+    if (bind(rgSocketServerFd, (struct sockaddr*)&rgSocketServerAddr, sizeof(rgSocketServerAddr)) < 0)
     {
         char errorMsg[256];
-        snprintf(errorMsg, sizeof(errorMsg), "Init: bind(%s:%d) failed - %s", ipStr, gServerPort, netErrorString(netLastError()));
+        snprintf(errorMsg, sizeof(errorMsg), "Init: bind(%s:%d) failed - %s", ipStr, gServerPort,
+                 netErrorString(netLastError()));
         logOutputErrorConsoleCharString(errorMsg);
         netSocketClose(rgSocketServerFd);
         rgSocketServerFd = SOCKET_INVALID;
@@ -241,7 +243,7 @@ void closeSocketServer()
     rgSocketServerFd = SOCKET_INVALID;
 }
 
-SOCKET_T connectSocketServer(SocketClientInfo *clientInfo, const char *host, int port)
+SOCKET_T connectSocketServer(SocketClientInfo* clientInfo, const char* host, int port)
 {
     logOutputDebugConsoleCharString("Connect: start connect to socket server");
 
@@ -309,14 +311,7 @@ SOCKET_T connectSocketServer(SocketClientInfo *clientInfo, const char *host, int
     snprintf(msg, sizeof(msg), "Connect: target IP %s, port %d", ipStr, ntohs(serverAddr.sin_port));
     logOutputDebugConsoleCharString(msg);
 
-    if (gConfigSocketIoUseMode != CONNECT_USE_IO_NONE)
-    {
-        logOutputErrorConsoleCharString("Connect: socket ioUseMode is not supported yet, only 'none' is implemented");
-        netSocketClose(sockFd);
-        return SOCKET_INVALID;
-    }
-
-    // 走到这里 ioUseMode 必然是 none（上面已拦截），整段是阻塞模式实现
+    if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
     {
         if (gConfigSocketConnectTimeoutMs > 0)
         {
@@ -341,7 +336,7 @@ SOCKET_T connectSocketServer(SocketClientInfo *clientInfo, const char *host, int
 
         while (!isBreak)
         {
-            int connectRet = connect(sockFd, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
+            int connectRet = connect(sockFd, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
             if (connectRet == 0)
             {
                 logOutputDebugConsoleCharString("Connect: connection established immediately");
@@ -366,11 +361,17 @@ SOCKET_T connectSocketServer(SocketClientInfo *clientInfo, const char *host, int
             return SOCKET_INVALID;
         }
     }
+    else
+    {
+        logOutputErrorConsoleCharString("Connect: socket ioUseMode is not supported yet, only 'none' is implemented");
+        netSocketClose(sockFd);
+        return SOCKET_INVALID;
+    }
 
     // 获取本地地址信息
     struct sockaddr_in localAddr;
     NET_SOCKLEN_T localLen = sizeof(localAddr);
-    if (getsockname(sockFd, (struct sockaddr *)&localAddr, &localLen) < 0)
+    if (getsockname(sockFd, (struct sockaddr*)&localAddr, &localLen) < 0)
     {
         logOutputErrorConsoleCharString("Connect: getsockname failed");
         netSocketClose(sockFd);
@@ -380,7 +381,7 @@ SOCKET_T connectSocketServer(SocketClientInfo *clientInfo, const char *host, int
     // 获取对端地址信息（可选）
     struct sockaddr_in peerAddr;
     NET_SOCKLEN_T peerLen = sizeof(peerAddr);
-    if (getpeername(sockFd, (struct sockaddr *)&peerAddr, &peerLen) < 0)
+    if (getpeername(sockFd, (struct sockaddr*)&peerAddr, &peerLen) < 0)
     {
         logOutputErrorConsoleCharString("Connect: getpeername failed");
         netSocketClose(sockFd);
