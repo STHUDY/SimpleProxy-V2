@@ -5,4 +5,4 @@
 // 用 localtime_r 而不是 localtime：localtime 返回共享的静态 struct tm，
 // 多 worker 并发打日志会互相覆盖时间戳。
 
-#define netLocalTime(tmPtr, timePtr) (localtime_r((tmPtr), (timePtr)) != NULL)
+#define netLocalTime(tmPtr, timePtr) (localtime_r((timePtr), (tmPtr)) != NULL)

@@ -1,0 +1,14 @@
+[
+  {
+    "label": "ninja build native binary",
+    "build": {
+      "command": "ninja",
+      "args": ["-j8"],
+      "cwd": "$ZED_WORKTREE_ROOT/build",
+    },
+    "program": "$ZED_WORKTREE_ROOT/build/SimpleProxy",
+    "args": ["-c", "$ZED_WORKTREE_ROOT/config.yml"],
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+]

@@ -1,7 +1,6 @@
+.cache
+
 build
 build-*
-.vscode
-.cache
 proxy.log
-.zed
 vcpkg_installed
