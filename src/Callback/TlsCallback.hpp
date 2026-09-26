@@ -13,5 +13,3 @@ void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo);
 void tlsListenerCallback();
 
 void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo);
-
-void selectBackendTarget();

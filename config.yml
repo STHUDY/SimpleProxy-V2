@@ -1,9 +1,9 @@
 config:
   socket:
-    ioUseMode: none
+    ioUseMode: none # 仅支持 none
     useThreadpoolAccept: true
-    noBlockReadOrWrite: true
-    noBlockConnect: true
+    noBlockReadOrWrite: false # 未实现，无效果
+    noBlockConnect: false # 未实现，无效果
     acceptTimeoutMs: 5000
     connectTimeoutMs: 5000
     pollingIntervalMs: 100
@@ -14,8 +14,8 @@ config:
     sslIoUseMode: none
     useThreadpoolAccept: true
     useThreadpoolSslAccept: true
-    noBlockReadOrWrite: false
-    noBlockConnect: true
+    noBlockReadOrWrite: false # 未实现，无效果
+    noBlockConnect: false # 未实现，无效果
     acceptTimeoutMs: 5000
     connectTimeoutMs: 5000
     pollingIntervalMs: 100
@@ -40,7 +40,7 @@ server:
     maxBacklog: 128
   tls:
     cert: cert.pem # TLS证书文件路径（当tls.enable=true时必需）
-    key: key.pem # TLS私钥文件路径（当tls.enable=true时必需）
+    privkey: key.pem # TLS私钥文件路径（当tls.enable=true时必需，键名是 privkey）
   connect:
     banIps: []
     allowedIps: []
@@ -51,6 +51,6 @@ client:
   socket:
     bufferSize: 1024
   tls:
-    hostname: 0.0.0.0 # 目标服务器主机名（用于证书验证）
-    sni: 0.0.0.0 # SNI扩展（通常与hostname相同）
-    cert: # CA证书文件路径（可选，用于自定义CA验证）
+    hostname: 0.0.0.0 # 已废弃，未被使用
+    sni: # SNI扩展，留空则透传客户端握手SNI；0.0.0.0/localhost 无法作为SNI，会导致后端证书主机名校验被关闭
+    cert: # CA证书文件路径（已废弃，未被使用）

@@ -60,4 +60,5 @@ int rgTlsSocketServerFd = -1;
 struct sockaddr_in rgTlsServerAddr;
 
 pthread_mutex_t rgLogWriteFileMutex;
+pthread_mutex_t rgLogOutputMutex;
 FILE *rgLogFileOpen = NULL;

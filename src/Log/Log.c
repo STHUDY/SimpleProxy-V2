@@ -8,13 +8,19 @@
 #define FATAL_COLOR "\033[0;35m" // 紫色
 #define RESET_COLOR "\033[0m"
 
-char *getCurrentTimeString()
+// 格式化当前时间到调用方缓冲区。
+// 用 localtime_r 而不是 localtime：后者返回共享静态存储，多线程会互相覆盖；
+// 时间戳也不能放 static 缓冲，否则同样会被别的线程写掉。
+static void formatCurrentTime(char *buf, size_t len)
 {
-    static char time_str[100];
     time_t now = time(0);
-    struct tm *tm_info = localtime(&now);
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
-    return time_str;
+    struct tm tm_info;
+    if (localtime_r(&now, &tm_info) == NULL)
+    {
+        snprintf(buf, len, "0000-00-00 00:00:00");
+        return;
+    }
+    strftime(buf, len, "%Y-%m-%d %H:%M:%S", &tm_info);
 }
 
 // 辅助函数：写入文件（线程安全）
@@ -23,9 +29,11 @@ static void writeToFile(const char *level, const char *msg)
     if (!gConfigLogEnbaleFile)
         return;
 
-    char *timeStr = getCurrentTimeString();
-    // 使用固定缓冲区避免多次分配，注意线程安全（此处简单起见，使用静态缓冲区可能冲突，但日志场景可接受）
-    static char outputMsg[512];
+    char timeStr[100];
+    formatCurrentTime(timeStr, sizeof(timeStr));
+
+    // 行缓冲放在栈上并在锁内拼装，避免多线程串行化时内容互相覆盖
+    char outputMsg[2048];
     snprintf(outputMsg, sizeof(outputMsg), "[%s] [%s] %s", timeStr, level, msg);
 
     pthread_mutex_lock(&rgLogWriteFileMutex);
@@ -38,7 +46,7 @@ static void writeToFile(const char *level, const char *msg)
             pthread_mutex_unlock(&rgLogWriteFileMutex);
             // 直接输出到 stderr（避免递归）
             fprintf(stderr, "[%s] [ERROR] open log file error: %s will not write log to file\n",
-                    getCurrentTimeString(), strerror(errno));
+                    timeStr, strerror(errno));
             return;
         }
     }
@@ -52,10 +60,13 @@ void logOutputFatalConsole(const char *msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_FATAL)
     {
-        char *timeStr = getCurrentTimeString();
         if (gConfigLogEnbaleConsole)
         {
+            char timeStr[100];
+            formatCurrentTime(timeStr, sizeof(timeStr));
+            pthread_mutex_lock(&rgLogOutputMutex);
             printf(FATAL_COLOR "[%s] [FATAL] %s" RESET_COLOR "\n", timeStr, msg);
+            pthread_mutex_unlock(&rgLogOutputMutex);
         }
         writeToFile("FATAL", msg);
     }
@@ -66,10 +77,13 @@ void logOutputErrorConsoleCharString(const char *msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_ERROR)
     {
-        char *timeStr = getCurrentTimeString();
         if (gConfigLogEnbaleConsole)
         {
+            char timeStr[100];
+            formatCurrentTime(timeStr, sizeof(timeStr));
+            pthread_mutex_lock(&rgLogOutputMutex);
             printf(ERROR_COLOR "[%s] [ERROR] %s" RESET_COLOR "\n", timeStr, msg);
+            pthread_mutex_unlock(&rgLogOutputMutex);
         }
         writeToFile("ERROR", msg);
     }
@@ -80,10 +94,13 @@ void logOutputWarnConsoleCharString(const char *msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_WARN)
     {
-        char *timeStr = getCurrentTimeString();
         if (gConfigLogEnbaleConsole)
         {
+            char timeStr[100];
+            formatCurrentTime(timeStr, sizeof(timeStr));
+            pthread_mutex_lock(&rgLogOutputMutex);
             printf(WARN_COLOR "[%s] [WARN] %s" RESET_COLOR "\n", timeStr, msg);
+            pthread_mutex_unlock(&rgLogOutputMutex);
         }
         writeToFile("WARN", msg);
     }
@@ -94,10 +111,13 @@ void logOutputInfoConsoleCharString(const char *msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_INFO)
     {
-        char *timeStr = getCurrentTimeString();
         if (gConfigLogEnbaleConsole)
         {
+            char timeStr[100];
+            formatCurrentTime(timeStr, sizeof(timeStr));
+            pthread_mutex_lock(&rgLogOutputMutex);
             printf(INFO_COLOR "[%s] [INFO] %s" RESET_COLOR "\n", timeStr, msg);
+            pthread_mutex_unlock(&rgLogOutputMutex);
         }
         writeToFile("INFO", msg);
     }
@@ -108,10 +128,13 @@ void logOutputDebugConsoleCharString(const char *msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_DEBUG)
     {
-        char *timeStr = getCurrentTimeString();
         if (gConfigLogEnbaleConsole)
         {
+            char timeStr[100];
+            formatCurrentTime(timeStr, sizeof(timeStr));
+            pthread_mutex_lock(&rgLogOutputMutex);
             printf(DEBUG_COLOR "[%s] [DEBUG] %s" RESET_COLOR "\n", timeStr, msg);
+            pthread_mutex_unlock(&rgLogOutputMutex);
         }
         writeToFile("DEBUG", msg);
     }

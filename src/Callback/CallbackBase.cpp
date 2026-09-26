@@ -25,11 +25,11 @@ bool isIpAllowed(const std::string &ip_str)
     }
 }
 
-void selectBackendTarget()
+bool selectBackendTarget(BackendTarget &target)
 {
     if (gClientHostList.empty() || gClientPortList.empty())
     {
-        return;
+        return false;
     }
 
     size_t selectedIndex = 0;
@@ -50,10 +50,9 @@ void selectBackendTarget()
         gClientRoundRobinIndex = (gClientRoundRobinIndex + 1) % listSize;
     }
 
-    // 更新全局变量供C代码使用
-    // 注意: gClientHostList[selectedIndex] 是临时string, 需要复制到静态或全局
-    static std::string selectedHost;
-    selectedHost = gClientHostList[selectedIndex];
-    gClientHostChar = const_cast<char *>(selectedHost.c_str());
-    gClientPort = gClientPortList[selectedIndex];
+    // 结果写进调用方持有的对象：每个 worker 各有自己的 target，
+    // connect 期间不会被其它线程的选址结果覆盖。
+    target.host = gClientHostList[selectedIndex];
+    target.port = gClientPortList[selectedIndex];
+    return true;
 }

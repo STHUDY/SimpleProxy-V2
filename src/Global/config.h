@@ -65,6 +65,7 @@ extern int rgTlsSocketServerFd;
 extern struct sockaddr_in rgTlsServerAddr;
 
 extern pthread_mutex_t rgLogWriteFileMutex;
+extern pthread_mutex_t rgLogOutputMutex;
 extern FILE *rgLogFileOpen;
 
 #endif

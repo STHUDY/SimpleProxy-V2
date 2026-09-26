@@ -16,7 +16,7 @@ static void listenSocketConnectIoNone(SocketClientCallback callback)
         socklen_t clientLen = sizeof(clientAddr);
         int clientFd = accept(rgSocketServerFd, (struct sockaddr *)&clientAddr, &clientLen);
 
-        if (clientFd > 0)
+        if (clientFd >= 0)
         {
             // 成功接受连接
             char clientIp[INET_ADDRSTRLEN];
@@ -213,7 +213,7 @@ void listenSocketServer(SocketClientCallback callback)
         return;
     }
 
-    if (gConfigTlsSocketIoUseMode == CONNECT_USE_IO_NONE)
+    if (gConfigSocketIoUseMode != CONNECT_USE_IO_NONE)
     {
         if (gConfigSocketAcceptTimeoutMs > 0)
         {
@@ -225,16 +225,23 @@ void listenSocketServer(SocketClientCallback callback)
             {
                 perror("Listen: setsockopt SO_SNDTIMEO");
                 close(rgSocketServerFd);
+                rgSocketServerFd = -1;
                 return;
             }
             if (setsockopt(rgSocketServerFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
             {
                 perror("Listen: setsockopt SO_RCVTIMEO");
                 close(rgSocketServerFd);
+                rgSocketServerFd = -1;
                 return;
             }
         }
         listenSocketConnectIoNone(callback);
+    }
+    else
+    {
+        logOutputErrorConsoleCharString("Listen: socket ioUseMode is not supported yet, only 'none' is implemented");
+        return;
     }
 
     logOutputInfoConsoleCharString("Listen: socket listening stopped");
@@ -248,7 +255,7 @@ void closeSocketServer()
     close(rgSocketServerFd);
 }
 
-int connectSocketServer(SocketClientInfo *clientInfo)
+int connectSocketServer(SocketClientInfo *clientInfo, const char *host, int port)
 {
     logOutputDebugConsoleCharString("Connect: start connect to socket server");
 
@@ -257,15 +264,15 @@ int connectSocketServer(SocketClientInfo *clientInfo)
         logOutputErrorConsoleCharString("Connect: client info is null");
         return -1;
     }
-    if (gClientHostChar == NULL || gClientHostChar[0] == '\0')
+    if (host == NULL || host[0] == '\0')
     {
         logOutputErrorConsoleCharString("Connect: client host is null or empty");
         return -1;
     }
-    if (gClientPort <= 0 || gClientPort > 65535)
+    if (port <= 0 || port > 65535)
     {
         char err[128];
-        snprintf(err, sizeof(err), "Connect: invalid port %d", gClientPort);
+        snprintf(err, sizeof(err), "Connect: invalid port %d", port);
         logOutputErrorConsoleCharString(err);
         return -1;
     }
@@ -284,27 +291,27 @@ int connectSocketServer(SocketClientInfo *clientInfo)
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(gClientPort);
+    serverAddr.sin_port = htons(port);
 
-    if (strcmp(gClientHostChar, "0.0.0.0") == 0 || strcmp(gClientHostChar, "*") == 0)
+    if (strcmp(host, "0.0.0.0") == 0 || strcmp(host, "*") == 0)
     {
         serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
         logOutputDebugConsoleCharString("Connect: connecting to 0.0.0.0 (any)");
     }
-    else if (strcmp(gClientHostChar, "127.0.0.1") == 0 || strcmp(gClientHostChar, "localhost") == 0)
+    else if (strcmp(host, "127.0.0.1") == 0 || strcmp(host, "localhost") == 0)
     {
         serverAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         logOutputDebugConsoleCharString("Connect: connecting to localhost");
     }
     else
     {
-        if (inet_pton(AF_INET, gClientHostChar, &serverAddr.sin_addr) <= 0)
+        if (inet_pton(AF_INET, host, &serverAddr.sin_addr) <= 0)
         {
-            struct hostent *hostent = gethostbyname(gClientHostChar);
+            struct hostent *hostent = gethostbyname(host);
             if (hostent == NULL)
             {
                 char err[256];
-                snprintf(err, sizeof(err), "Connect: cannot resolve hostname '%s'", gClientHostChar);
+                snprintf(err, sizeof(err), "Connect: cannot resolve hostname '%s'", host);
                 logOutputErrorConsoleCharString(err);
                 close(sockFd);
                 return -1;
@@ -317,7 +324,7 @@ int connectSocketServer(SocketClientInfo *clientInfo)
     char ipStr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &serverAddr.sin_addr, ipStr, sizeof(ipStr));
     char msg[256];
-    snprintf(msg, sizeof(msg), "Connect: target IP %s, port %d", ipStr, gClientPort);
+    snprintf(msg, sizeof(msg), "Connect: target IP %s, port %d", ipStr, port);
     logOutputDebugConsoleCharString(msg);
 
     if (gConfigSocketIoUseMode == CONNECT_USE_IO_NONE)
@@ -371,6 +378,12 @@ int connectSocketServer(SocketClientInfo *clientInfo)
             close(sockFd);
             return -1;
         }
+    }
+    else
+    {
+        logOutputErrorConsoleCharString("Connect: socket ioUseMode is not supported yet, only 'none' is implemented");
+        close(sockFd);
+        return -1;
     }
 
     // 获取本地地址信息

@@ -36,7 +36,7 @@ extern "C"
 
     void closeTlsServer();
 
-    int connectTlsServer(TlsClientInfo *clientInfo, const char *sni);
+    int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *host, int port);
 
     void closeTlsResource();
 

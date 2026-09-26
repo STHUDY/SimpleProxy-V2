@@ -15,12 +15,22 @@ static void socketCreateProxyMission(SocketClientInfo *aConnectInfo, SocketClien
         return;
     }
 
-    selectBackendTarget();
+    BackendTarget backend;
+    if (!selectBackendTarget(backend))
+    {
+        logOutputErrorConsole("No backend available for client " + clientAddr);
+        shutdown(aConnectInfo->fd, SHUT_RDWR);
+        close(aConnectInfo->fd);
 
-    if (connectSocketServer(bConnectInfo) < 0)
+        delete aConnectInfo;
+        delete bConnectInfo;
+        return;
+    }
+
+    if (connectSocketServer(bConnectInfo, backend.host.c_str(), backend.port) < 0)
     {
         logOutputErrorConsole("Failed to establish backend connection for client " + clientAddr);
-        if (aConnectInfo->fd > 0)
+        if (aConnectInfo->fd >= 0)
         {
             shutdown(aConnectInfo->fd, SHUT_RDWR);
             close(aConnectInfo->fd);

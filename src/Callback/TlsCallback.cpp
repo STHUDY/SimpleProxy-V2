@@ -52,8 +52,8 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
                 tlsClientInfo.fd = aSocket;
                 tlsClientInfo.ssl_ctx = ctx;
                 tlsClientInfo.ssl = ssl;
-                memcpy(&tlsClientInfo.addr, &aConnectInfo->addr, sizeof(aConnectInfo->addr_len));
-                tlsClientInfo.addr_len = sizeof(aConnectInfo->addr);
+                memcpy(&tlsClientInfo.addr, &aConnectInfo->addr, sizeof(aConnectInfo->addr));
+                tlsClientInfo.addr_len = aConnectInfo->addr_len;
                 strncpy(tlsClientInfo.ip_str, aConnectInfo->ip_str, INET_ADDRSTRLEN);
                 tlsClientInfo.port = aConnectInfo->port;
                 tlsCallback(aSocket, &tlsClientInfo);
@@ -139,10 +139,12 @@ static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bC
     std::string sniStr;
     const char *sni = NULL;
 
-    if (gClientTlsSniChar == "")
+    if (gClientTlsSniChar == NULL || gClientTlsSniChar[0] == '\0')
     {
+        // 未配置 sni：透传客户端握手带来的 SNI。客户端可能没带，
+        // SSL_get_servername() 会返回 NULL，不能拿它构造 std::string。
         sni = SSL_get_servername(aConnectInfo->ssl, TLSEXT_NAMETYPE_host_name);
-        sniStr = sni;
+        sniStr = (sni != NULL) ? sni : "";
     }
     else
     {
@@ -150,9 +152,27 @@ static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bC
         sni = sniStr.c_str();
     }
 
-    selectBackendTarget();
+    BackendTarget backend;
+    if (!selectBackendTarget(backend))
+    {
+        logOutputErrorConsole("No backend available for TLS client " + clientAddr);
+        if (aConnectInfo->ssl)
+        {
+            SSL_shutdown(aConnectInfo->ssl);
+            SSL_free(aConnectInfo->ssl);
+            SSL_CTX_free(aConnectInfo->ssl_ctx);
+        }
+        if (aConnectInfo->fd >= 0)
+        {
+            close(aConnectInfo->fd);
+        }
 
-    if (connectTlsServer(bConnectInfo, sni) < 0)
+        delete aConnectInfo;
+        delete bConnectInfo;
+        return;
+    }
+
+    if (connectTlsServer(bConnectInfo, sni, backend.host.c_str(), backend.port) < 0)
     {
         logOutputErrorConsole("Failed to establish TLS backend connection for client " + clientAddr + " (SNI: " + sniStr + ")");
         if (aConnectInfo->ssl)
@@ -328,7 +348,8 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
         return;
     }
 
-    const float PollTimeSeconds = (float)gConfigTlsPollingIntervalMs / 1000.0f;
+    // timeout 统一以毫秒累计，与两个 *TimeoutMs 配置项同单位
+    const float pollTimeMs = (float)gConfigTlsPollingIntervalMs;
     float timeout = 0;
 
     while (rgTlsServerRun)
@@ -345,10 +366,10 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
         }
         if (eventsNumber == 0)
         {
-            timeout += PollTimeSeconds;
-            if (gConfigTlsReadOrWriteTimeoutMs > 0 && timeout > gConfigTlsReadOrWriteTimeoutMs)
+            timeout += pollTimeMs;
+            if (gConfigTlsReadOrWriteTimeoutMs > 0 && timeout >= (float)gConfigTlsReadOrWriteTimeoutMs)
             {
-                logOutputWarnConsole("tls Proxy: Timeout while waiting for epoll events " + std::to_string(timeout));
+                logOutputWarnConsole("tls Proxy: idle timeout after " + std::to_string((int)timeout) + "ms");
                 break;
             }
             else
@@ -361,7 +382,9 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
 
         bool isBreak = false;
 
-        for (int i = 0; i < eventsNumber;)
+        // epoll 是水平触发：一次事件只做一次 SSL_read/SSL_write，
+        // 剩余数据会再次触发 EPOLLIN，不需要靠 SSL_pending() 手工排空。
+        for (int i = 0; i < eventsNumber; i++)
         {
             int activeFd = events[i].data.fd;
             uint32_t eventFlags = events[i].events;
@@ -374,14 +397,6 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                 int bufferSize = isAtoB ? gClientSocketBufferSize : gServerSocketBufferSize;
 
                 int sslReadNum = SSL_read(srcSsl, buffer, bufferSize);
-                if (gConfigTlsNoBlockReadOrWrite == false)
-                {
-                    if (SSL_pending(srcSsl) == 0)
-                    {
-                        timeout = 0;
-                        i++;
-                    }
-                }
                 if (sslReadNum > 0)
                 {
                     logOutputDebugConsole((isAtoB ? "tls client -> proxy: " : "tls server -> proxy: ") + std::to_string(sslReadNum) + " bytes from aSocket");
@@ -399,25 +414,28 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                             int sendErrno = SSL_get_error(dstSsl, sentNum);
                             if (sendErrno == SSL_ERROR_WANT_WRITE)
                             {
+                                // 必须等目标端可写：a->b 时目标是 bSocket，反之是 aSocket
+                                int dstSocket = isAtoB ? bSocket : aSocket;
+
                                 fd_set writefds;
                                 FD_ZERO(&writefds);
-                                FD_SET(activeFd, &writefds);
+                                FD_SET(dstSocket, &writefds);
 
                                 struct timeval timeoutUse = {
                                     static_cast<time_t>(gConfigSocketPollingIntervalMs / 1000),
                                     static_cast<suseconds_t>((gConfigSocketPollingIntervalMs % 1000) * 1000)};
 
-                                int ret = select(activeFd + 1, NULL, &writefds, NULL, &timeoutUse);
+                                int ret = select(dstSocket + 1, NULL, &writefds, NULL, &timeoutUse);
                                 if (ret <= 0)
                                 {
                                     logOutputErrorConsole("tls Proxy: bSsl write select failed: " + std::string(strerror(errno)));
                                     isBreak = true;
                                     break;
                                 }
-                                timeout += PollTimeSeconds;
-                                if (timeout > gConfigTlsConnectTimeoutMs)
+                                timeout += pollTimeMs;
+                                if (gConfigTlsConnectTimeoutMs > 0 && timeout >= (float)gConfigTlsConnectTimeoutMs)
                                 {
-                                    logOutputWarnConsole("tls Proxy: Timeout while waiting for epoll events " + std::to_string(timeout));
+                                    logOutputWarnConsole("tls Proxy: write timeout after " + std::to_string((int)timeout) + "ms");
                                     isBreak = true;
                                     break;
                                 }
@@ -438,8 +456,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                     if (recvErrno == SSL_ERROR_WANT_READ)
                     {
                         timeout = 0;
-                        i++;
-                        continue;
+                        continue;   // i 由 for 语句自增
                     }
                     else if (recvErrno == SSL_ERROR_SYSCALL)
                     {

@@ -149,6 +149,11 @@ int main(int argc, char *argv[])
         YAML::Node config = YAML::LoadFile(configFile);
 
         gConfigSocketIoUseMode = chooseConnectUseIoMode(config["config"]["socket"]["ioUseMode"].as<std::string>("none"));
+        if (gConfigSocketIoUseMode != CONNECT_USE_IO_NONE)
+        {
+            logOutputFatalConsole("config.socket.ioUseMode only supports 'none', other io models are not implemented");
+            return EXIT_FAILURE;
+        }
         gConfigSocketUseThreadpoolAccept = config["config"]["socket"]["useThreadpoolAccept"].as<bool>(true);
         gConfigSocketNoBlockReadOrWrite = config["config"]["socket"]["noBlockReadOrWrite"].as<bool>(false);
         gConfigSocketNoBlockConnect = config["config"]["socket"]["noBlockConnect"].as<bool>(false);
@@ -162,6 +167,11 @@ int main(int argc, char *argv[])
         {
             gConfigTlsSocketIoUseMode = chooseConnectUseIoMode(config["config"]["tls"]["socketIoUseMode"].as<std::string>("none"));
             gConfigTlsSslIoUseMode = chooseConnectUseIoMode(config["config"]["tls"]["sslIoUseMode"].as<std::string>("none"));
+            if (gConfigTlsSocketIoUseMode != CONNECT_USE_IO_NONE || gConfigTlsSslIoUseMode != CONNECT_USE_IO_NONE)
+            {
+                logOutputFatalConsole("config.tls.socketIoUseMode and config.tls.sslIoUseMode only support 'none', other io models are not implemented");
+                return EXIT_FAILURE;
+            }
             gConfigTlsUseThreadpoolAccept = config["config"]["tls"]["useThreadpoolAccept"].as<bool>(true);
             gConfigTlsUseThreadpoolSslConnect = config["config"]["tls"]["useThreadpoolSslAccept"].as<bool>(true);
             gConfigTlsNoBlockReadOrWrite = config["config"]["tls"]["noBlockReadOrWrite"].as<bool>(false);
@@ -252,7 +262,21 @@ int main(int argc, char *argv[])
                     gServerTlsCertFileChar = const_cast<char *>(gServerTlsCertFileString.c_str());
                 }
             }
-            gServerTlsKeyFileString = config["server"]["tls"]["privkey"].as<std::string>("");
+            // 规范键是 privkey；同时兼容旧配置里写的 key，避免升级后私钥读不到
+            std::string privkeyValue = config["server"]["tls"]["privkey"].as<std::string>("");
+            std::string privkeyKeyName = "server.tls.privkey";
+            if (privkeyValue == "")
+            {
+                std::string legacyKeyValue = config["server"]["tls"]["key"].as<std::string>("");
+                if (legacyKeyValue != "")
+                {
+                    privkeyValue = legacyKeyValue;
+                    privkeyKeyName = "server.tls.key";
+                    logOutputWarnConsole("server.tls.key is deprecated, rename it to server.tls.privkey");
+                }
+            }
+
+            gServerTlsKeyFileString = privkeyValue;
             if (gServerTlsKeyFileString == "")
             {
                 logOutputErrorConsole("server.tls.privkey is empty");
@@ -262,12 +286,12 @@ int main(int argc, char *argv[])
                 std::filesystem::path checkKeyPath(gServerTlsKeyFileString);
                 if (!std::filesystem::exists(checkKeyPath))
                 {
-                    logOutputErrorConsole("server.tls.privkey file not exists");
+                    logOutputErrorConsole(privkeyKeyName + " file not exists: " + gServerTlsKeyFileString);
                     gServerTlsKeyFileString = "";
                 }
                 else
                 {
-                    logOutputInfoConsole("server.tls.privkey file: " + gServerTlsKeyFileString);
+                    logOutputInfoConsole(privkeyKeyName + " file: " + gServerTlsKeyFileString);
                     gServerTlsKeyFileChar = const_cast<char *>(gServerTlsKeyFileString.c_str());
                 }
             }

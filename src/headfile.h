@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <filesystem>
+#include <sstream>
 #include <new>
 #endif
 //==================用户C库================

@@ -25,7 +25,7 @@ extern "C"
 
     void closeSocketServer();
 
-    int connectSocketServer(SocketClientInfo *clientInfo);
+    int connectSocketServer(SocketClientInfo *clientInfo, const char *host, int port);
 
 #ifdef __cplusplus
 }

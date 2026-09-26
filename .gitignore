@@ -3,3 +3,4 @@ build
 .cache
 proxy.log
 .zed
+vcpkg_installed

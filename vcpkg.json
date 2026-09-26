@@ -1,0 +1,7 @@
+{
+  "builtin-baseline": "11ace808cc8a3a941f386e33726b992b22ba9e5a",
+  "dependencies": [
+    "openssl",
+    "yaml-cpp"
+  ]
+}

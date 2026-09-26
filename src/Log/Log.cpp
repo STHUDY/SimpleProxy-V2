@@ -8,14 +8,20 @@ const std::string ERROR_COLOR = "\033[0;31m"; // 红色
 const std::string FATAL_COLOR = "\033[0;35m"; // 紫色
 const std::string RESET_COLOR = "\033[0m";
 
-// 获取当前时间字符串
-std::string getCurrentTime()
+// 获取当前时间字符串。
+// 用 localtime_r + 调用方缓冲区：原先的 static 缓冲 + localtime()
+// 会让多线程日志互相覆盖时间戳。
+static std::string getCurrentTime()
 {
-    static char time_str[100];
+    char time_str[100];
     time_t now = time(0);
-    struct tm *tm_info = localtime(&now);
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
-    return time_str;
+    struct tm tm_info;
+    if (localtime_r(&now, &tm_info) == NULL)
+    {
+        return std::string("0000-00-00 00:00:00");
+    }
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &tm_info);
+    return std::string(time_str);
 }
 
 // 内部辅助函数：写入文件（线程安全）
@@ -48,6 +54,15 @@ static void writeToFile(const std::string &level, const std::string &msg)
     pthread_mutex_unlock(&rgLogWriteFileMutex);
 }
 
+// 控制台输出加锁，保证时间戳与正文不被其它线程的输出穿插
+static void outputConsole(const std::string &color, const std::string &level, const std::string &msg)
+{
+    std::string outputMsg = "[" + getCurrentTime() + "] [" + level + "] " + msg;
+    pthread_mutex_lock(&rgLogOutputMutex);
+    std::cout << color << outputMsg << RESET_COLOR << std::endl;
+    pthread_mutex_unlock(&rgLogOutputMutex);
+}
+
 // ---------- FATAL ----------
 void logOutputFatalConsole(const char *msg)
 {
@@ -58,10 +73,9 @@ void logOutputFatalConsole(const std::string &msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_FATAL)
     {
-        std::string outputMsg = "[" + getCurrentTime() + "] [FATAL] " + msg;
         if (gConfigLogEnbaleConsole)
         {
-            std::cout << FATAL_COLOR << outputMsg << RESET_COLOR << std::endl;
+            outputConsole(FATAL_COLOR, "FATAL", msg);
         }
         writeToFile("FATAL", msg);
     }
@@ -77,10 +91,9 @@ void logOutputErrorConsole(const std::string &msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_ERROR)
     {
-        std::string outputMsg = "[" + getCurrentTime() + "] [ERROR] " + msg;
         if (gConfigLogEnbaleConsole)
         {
-            std::cout << ERROR_COLOR << outputMsg << RESET_COLOR << std::endl;
+            outputConsole(ERROR_COLOR, "ERROR", msg);
         }
         writeToFile("ERROR", msg);
     }
@@ -96,10 +109,9 @@ void logOutputWarnConsole(const std::string &msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_WARN)
     {
-        std::string outputMsg = "[" + getCurrentTime() + "] [WARN] " + msg;
         if (gConfigLogEnbaleConsole)
         {
-            std::cout << WARN_COLOR << outputMsg << RESET_COLOR << std::endl;
+            outputConsole(WARN_COLOR, "WARN", msg);
         }
         writeToFile("WARN", msg);
     }
@@ -115,10 +127,9 @@ void logOutputInfoConsole(const std::string &msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_INFO)
     {
-        std::string outputMsg = "[" + getCurrentTime() + "] [INFO] " + msg;
         if (gConfigLogEnbaleConsole)
         {
-            std::cout << INFO_COLOR << outputMsg << RESET_COLOR << std::endl;
+            outputConsole(INFO_COLOR, "INFO", msg);
         }
         writeToFile("INFO", msg);
     }
@@ -134,10 +145,9 @@ void logOutputDebugConsole(const std::string &msg)
 {
     if (gConfigLogEnbale && gConfigLogLevel <= LOG_LEVEL_DEBUG)
     {
-        std::string outputMsg = "[" + getCurrentTime() + "] [DEBUG] " + msg;
         if (gConfigLogEnbaleConsole)
         {
-            std::cout << DEBUG_COLOR << outputMsg << RESET_COLOR << std::endl;
+            outputConsole(DEBUG_COLOR, "DEBUG", msg);
         }
         writeToFile("DEBUG", msg);
     }
