@@ -79,13 +79,15 @@ worker 消费用 `front()` + `pop_front()`（`:126-127`，FIFO），而丢弃路
 
 ---
 
-## 4. `.clangd` 与实际目录不符
+## 4. `src/` 子目录增删后必须同步 `.clangd`
 
-`.clangd` 里 `-Isrc/Handle` —— `src/` 下没有 `Handle` 目录；缺 `-Isrc/Callback` —— 该目录存在且 `headfile.h` 依赖它。另外 `build/` 里没有 `compile_commands.json`（`build/` 已被 `.gitignore` 忽略），`CompilationDatabase: build/` 也无从生效。
+`.clangd` 的 `Add` 列表和 `CMakeLists.txt` 里 `file(GLOB_RECURSE SUBDIRS src/*)` + `get_filename_component(... DIRECTORY)` 展开出来的 include 路径是**同一件事的两份声明**：CMake 自动跟着 `src/` 走，`.clangd` 不会。
 
-**后果**：编辑器跨模块跳转和补全会缺符号，容易误以为是自己 include 写错了。
+CMake 当前实际添加的是 `src` 加全部 5 个子目录（`Callback` / `Global` / `Log` / `ProtocolServer` / `Threadpool`）。`.clangd` 里的 `Add` 必须与这个集合完全一致，且**只能用目录名，不能用通配符**（clangd 的 `Add` 不支持 glob）。
 
-**成因**：目录增删后没有同步工具配置。**`CMakeLists.txt` 的 include 路径和 `.clangd` 的 `Add` 列表是同一件事的两份声明，改一处必须改另一处。**
+新增 `src/` 子目录时要同时做两件事：把头文件按裸文件名 include（依赖 CMake 自动加的 include 路径），并往 `.clangd` 里补一条对应的 `-I`。
+
+**成因**：目录增删只改了 CMake 一侧，工具配置靠人记。**include 路径在仓库里有两份声明，改一处必须改另一处。**
 
 ---
 

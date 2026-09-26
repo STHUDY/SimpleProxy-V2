@@ -49,7 +49,7 @@ make -j$(nproc)
 - **include 写裸文件名**（`#include "nSocket.h"`）：`CMakeLists.txt:33-38` 把每个 `src/*` 子目录都加进了 include 路径。
 - **`headfile.h` 没有 include guard**，它会被同一个 TU 重复展开，靠下游 `nSocket.h` / `nTls.h` / `config.h` / `Log.h` / `define.h` 的 `#ifndef` 和各 `.hpp` 的 `#pragma once` 终止递归。**新增头文件必须自带 guard 或 `#pragma once`**，否则无限递归。
 - `TlsCallback.cpp` 用了 `std::ostringstream`，`<sstream>` 已补进 `headfile.h`；用到新标准库设施时同样把头文件补进去，不要依赖传递包含。
-- **`.clangd` 已过期**：含不存在的 `-Isrc/Handle`，且漏了实际存在的 `-Isrc/Callback`。增删 `src/` 子目录时同步它。
+- **`.clangd` 的 `Add` 列表必须和 `CMakeLists.txt` 展开出的 include 路径一致**（当前 = `src` + 5 个子目录）。增删 `src/` 子目录时同步它；clangd 的 `Add` 不支持 glob，只能逐条列。`CompilationDatabase: build/` 依赖 `CMakeLists.txt` 里的 `CMAKE_EXPORT_COMPILE_COMMANDS`。
 - **全局配置是 C / C++ 双份**：
   - `src/Global/config.h` + `config.c` —— C 侧（`g*` 配置、`rg*` 运行时、`char*` 别名）
   - `src/Global/config.hpp` + `config.cpp` —— C++ 侧（`std::string` / `std::vector` / `rgThreadPool`）

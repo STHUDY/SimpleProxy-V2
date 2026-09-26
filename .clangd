@@ -1,9 +1,11 @@
 CompileFlags:
+  # 需要 CMakeLists.txt 里 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) 才会生成
+  # build/compile_commands.json，否则这一行不生效
   CompilationDatabase: build/
   Add:
     - "-Isrc"
+    - "-Isrc/Callback"
     - "-Isrc/Global"
-    - "-Isrc/Handle"
     - "-Isrc/Log"
     - "-Isrc/ProtocolServer"
     - "-Isrc/Threadpool"

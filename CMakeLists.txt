@@ -7,6 +7,9 @@ find_package(Threads REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(OpenSSL REQUIRED)
 
+# 生成 build/compile_commands.json，供 clangd / clang-tidy 使用（.clangd 的 CompilationDatabase 指向它）
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # 包含源文件
 file(GLOB_RECURSE SOURCES
     "${PROJECT_SOURCE_DIR}/src/**/*.cpp"
