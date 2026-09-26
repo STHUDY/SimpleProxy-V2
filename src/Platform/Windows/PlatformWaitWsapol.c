@@ -1,4 +1,3 @@
-#include "headfile.h"
 #include "PlatformWaitWsapol.h"
 
 // 代理每条连接最多同时等两个 fd（客户端 + 后端），留一点余量
