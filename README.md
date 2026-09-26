@@ -288,7 +288,7 @@ server:
   - 经验值：**`maxWokers >= 2 × 预期最大并发连接数`**（明文模式每条连接常驻 2 个 worker，TLS 模式 1 个）
   - 容量不足的日志信号：`exec_mission error`（任务被丢弃）、`create_worker error`
 - **`readOrWriteTimeoutMs <= 0` 时空闲连接会永久占用 worker**，高并发下容易被大量长连接拖满线程池。
-- 任务抛异常会触发 `mission_drop`，此时会**从队列里额外弹掉一个无关任务**（任务出队 FIFO/LIFO 混用，见 `MISTAKE.md` 第 16 条），看到 `exec_mission error` 时要意识到丢的可能不是当前这条连接。
+- 任务抛异常会触发 `mission_drop`，此时会**从队列里额外弹掉一个无关任务**（任务出队 FIFO/LIFO 混用，见 `MISTAKE.md`），看到 `exec_mission error` 时要意识到丢的可能不是当前这条连接。
 - **没有测试、没有 CI、没有 lint / format 配置**。验证方式 = 干净编译 + 手工冒烟。
 
 ## 故障排查
@@ -324,4 +324,4 @@ src/
 ## 相关文档
 
 - [`AGENTS.md`](AGENTS.md) —— 给 AI agent 的开发约定：构建红线、内存与生命周期红线、配置键位
-- [`MISTAKE.md`](MISTAKE.md) —— 本仓库已核实并已修复的缺陷（含成因），以及尚未修复的遗留项
+- [`MISTAKE.md`](MISTAKE.md) —— 本仓库已核实**但尚未修复**的缺陷（含成因与证据）；已修复的缺陷成因保留在 git 历史里
