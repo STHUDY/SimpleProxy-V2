@@ -38,7 +38,7 @@ cmake -DCMAKE_BUILD_TYPE=Release .. && make -j$(nproc)
 
 产物 `build/SimpleProxy`。
 
-**未验证**：本文档编写时手头没有 gcc，Linux 构建与冒烟尚未实际执行。以上命令来自 AGENTS.md 的既有约定加本次改造的 CMake 改动。
+**已验证**：Linux 构建已通过（gcc, Debug）。
 
 ---
 

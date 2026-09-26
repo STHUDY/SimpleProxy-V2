@@ -46,7 +46,7 @@ src/
 - 运行：`./build/SimpleProxy [-c config.yml]`（Windows：`.\build\Release\SimpleProxy.exe`）
 - **配置里的相对路径按进程 CWD 解析**，不是按配置文件所在目录。
 - **没有测试框架、没有 CI、没有 lint / format 配置**。不要擅自引入测试框架。`test/` 下只有场景配置和说明文档。验证方式 = 干净编译 + 手工冒烟。
-- **验证状态**：Windows x64（MSVC）编译与明文 / TLS 冒烟均已通过；**Linux 侧尚未实际编译验证**（编写时手头无 gcc），不要声称"Linux 已验证"。
+- **验证状态**：Windows x64（MSVC）编译与明文 / TLS 冒烟均已通过；Linux x64（gcc）编译已通过。
 
 
 ## 源码组织

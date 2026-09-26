@@ -378,7 +378,7 @@ server:
 
 - **只支持 IPv4**。地址结构是 `sockaddr_in`，没有 IPv6 支持。
 - **macOS 未适配**。`src/Platform/` 下只有 `Linux/` 和 `Windows/`，没有第三份实现。
-- **Linux 侧尚未实际验证**。改造写成行为等价重构并逐条复核过源码，但本机没有 gcc，编译与冒烟都没跑过。Windows x64 已验证。
+- **Linux 侧编译已通过**（gcc, Debug）。Windows x64 编译与冒烟均已验证。
 - **yaml-cpp 的 null 字符串陷阱**：`node.as<std::string>(fallback)` 在节点为 null（YAML 里写成裸键 `key:`）时返回的是**字面量字符串 `"null"`**，不是 `fallback`。受影响的键：`client.tls.sni`、`client.tls.hostname`、`client.tls.cert`、`server.tls.cert`、`server.tls.privkey`、`config.log.filePath`。
   - `client.tls.sni` 是唯一会造成**静默功能失效**的：它会真的被当成 SNI `null` 发给后端，并强制校验后端证书对 `null` 有效，表现为"TLS 模式所有连接握手失败"且无告警。**要留空必须写 `sni: ""`。**
   - 其余几项要么随后被 `std::filesystem::exists` 判为不存在而清空（`server.tls.cert` / `privkey`），要么本来就是死配置。

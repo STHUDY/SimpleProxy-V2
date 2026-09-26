@@ -26,6 +26,14 @@
 
 ### 1. 后端（窗口 A）—— 回显服务
 
+**Linux：**
+
+```bash
+nc -l 127.0.0.1 19801
+```
+
+**Windows（PowerShell）：**
+
 ```powershell
 $l=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,19801);$l.Start()
 while($true){$c=$l.AcceptTcpClient();$s=$c.GetStream();$b=New-Object byte[] 4096
@@ -49,11 +57,27 @@ client:
 
 ### 3. 起代理
 
+**Linux：**
+
+```bash
+./build/SimpleProxy -c 明文配置.yml
+```
+
+**Windows：**
+
 ```powershell
 .\build\Release\SimpleProxy.exe -c 明文配置.yml
 ```
 
 ### 4. 客户端（窗口 C）
+
+**Linux：**
+
+```bash
+echo -n "ping" | nc 127.0.0.1 19800
+```
+
+**Windows（PowerShell）：**
 
 ```powershell
 $c=[System.Net.Sockets.TcpClient]::new("127.0.0.1",19800);$s=$c.GetStream();$s.ReadTimeout=5000
@@ -82,6 +106,17 @@ TLS 模式有**两个独立握手**：对客户端 `SSL_accept`，对后端 `SSL
 
 ### 1. 生成证书
 
+**Linux：**
+
+```bash
+cd tlstest
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout proxy.crt -out proxy.key -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+**Windows（PowerShell）：**
+
 ```powershell
 cd C:\Users\ZYLQQ\Project\C++\SimpleProxy-V2\tlstest
 $ossl = "C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
@@ -94,6 +129,15 @@ $ossl = "C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
 **`-addext "subjectAltName=..."` 不能省。** OpenSSL 1.0.2 起（Windows 也一样）主机名校验**不再看 CN 字段，只看 SAN**。只写 `-subj "/CN=localhost"` 会导致主机名校验失败。
 
 `openssl s_server` / `s_client` 是子命令（OpenSSL 1.1+ 起不再是独立 exe）：
+
+**Linux：**
+
+```bash
+openssl s_server -accept 19901 -cert backend.crt -key backend.key -www
+openssl s_client -connect 127.0.0.1:19900 -servername localhost -CAfile proxy.crt
+```
+
+**Windows（PowerShell）：**
 
 ```powershell
 & $ossl s_server -accept 19901 -cert backend.crt -key backend.key -www
@@ -112,6 +156,14 @@ $ossl = "C:\Program Files\OpenSSL-Win64\bin\openssl.exe"
 
 `client.tls.cert` 是追加不是替换，配了自签 CA 之后公共 CA 依然能用。填一个真正的 CA bundle：
 
+**Linux：**
+
+```bash
+cp /etc/ssl/certs/ca-certificates.crt ./ca-bundle.crt
+```
+
+**Windows（PowerShell）：**
+
 ```powershell
 Copy-Item "C:\Program Files\Git\usr\ssl\certs\ca-bundle.crt" .\ca-bundle.crt
 ```
@@ -119,12 +171,20 @@ Copy-Item "C:\Program Files\Git\usr\ssl\certs\ca-bundle.crt" .\ca-bundle.crt
 ```yaml
 client:
   tls:
-    cert: C:/Users/.../tlstest/ca-bundle.crt
+    cert: ca-bundle.crt
 ```
 
 **不能填 `server.tls.cert` 那个自签叶子证书** —— 那是代理自己的证书，验不了公共 CA 签发的后端证书。判断方法：自签证书 1 KB / 1 张，CA bundle 200 KB 上下 / 上百张。
 
 **B. 环境变量**
+
+**Linux：**
+
+```bash
+export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+```
+
+**Windows（PowerShell）：**
 
 ```powershell
 $env:SSL_CERT_FILE = "C:\Program Files\Git\usr\ssl\certs\ca-bundle.crt"
@@ -146,8 +206,8 @@ server:
   socket:
     bufferSize: 8192        # TLS 模式低于 8192 会打性能告警
   tls:
-    cert: C:/.../tlstest/proxy.crt
-    privkey: C:/.../tlstest/proxy.key
+    cert: tlstest/proxy.crt
+    privkey: tlstest/proxy.key
 client:
   host: "www.baidu.com"
   port: 443                  # 写 80 是明文 HTTP 端口，TLS 握手必然失败
@@ -155,7 +215,7 @@ client:
     bufferSize: 8192
   tls:
     sni: "www.baidu.com"     # 要和后端证书的 CN/SAN 一致
-    cert: C:/.../tlstest/ca-bundle.crt
+    cert: tlstest/ca-bundle.crt
 ```
 
 `sni` 写 `""` 也能过（只做链校验、不做主机名校验），但会打一条 WARN。**要写 `""` 而不是裸键** `sni:` —— 裸键会被 yaml-cpp 读成字符串 `"null"`，然后真的拿 `null` 当 SNI 发给后端并按 `null` 校验证书，导致所有握手失败且无告警。代码侧已有 `normalizeConfigString()` 兜底，但配置本身写清楚更好。
@@ -166,8 +226,16 @@ client:
 
 代理给客户端呈现的是 `proxy.crt`（自签），所以 curl 要显式带上它：
 
+**Linux：**
+
+```bash
+curl --cacert ./proxy.crt -H "Host: www.baidu.com" https://127.0.0.1:1200
+```
+
+**Windows（PowerShell）：**
+
 ```powershell
-curl --cacert C:\Users\ZYLQQ\Project\C++\SimpleProxy-V2\tlstest\proxy.crt https://127.0.0.1:1200
+curl --cacert ./proxy.crt -H "Host: www.baidu.com" https://127.0.0.1:1200
 ```
 
 `curl -k` 可以跳过校验。
