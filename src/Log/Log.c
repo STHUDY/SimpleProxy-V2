@@ -15,7 +15,7 @@ static void formatCurrentTime(char *buf, size_t len)
 {
     time_t now = time(0);
     struct tm tm_info;
-    if (localtime_r(&now, &tm_info) == NULL)
+    if (!netLocalTime(&tm_info, &now))
     {
         snprintf(buf, len, "0000-00-00 00:00:00");
         return;
@@ -36,14 +36,14 @@ static void writeToFile(const char *level, const char *msg)
     char outputMsg[2048];
     snprintf(outputMsg, sizeof(outputMsg), "[%s] [%s] %s", timeStr, level, msg);
 
-    pthread_mutex_lock(&rgLogWriteFileMutex);
+    netMutexLock(rgLogWriteFileMutex);
     if (rgLogFileOpen == NULL)
     {
         rgLogFileOpen = fopen(gConfigLogFileChar, "a");
         if (rgLogFileOpen == NULL)
         {
             gConfigLogEnbaleFile = false;
-            pthread_mutex_unlock(&rgLogWriteFileMutex);
+            netMutexUnlock(rgLogWriteFileMutex);
             // 直接输出到 stderr（避免递归）
             fprintf(stderr, "[%s] [ERROR] open log file error: %s will not write log to file\n",
                     timeStr, strerror(errno));
@@ -52,7 +52,7 @@ static void writeToFile(const char *level, const char *msg)
     }
     fprintf(rgLogFileOpen, "%s\n", outputMsg);
     fflush(rgLogFileOpen);
-    pthread_mutex_unlock(&rgLogWriteFileMutex);
+    netMutexUnlock(rgLogWriteFileMutex);
 }
 
 // ---------- FATAL ----------
@@ -64,9 +64,9 @@ void logOutputFatalConsole(const char *msg)
         {
             char timeStr[100];
             formatCurrentTime(timeStr, sizeof(timeStr));
-            pthread_mutex_lock(&rgLogOutputMutex);
+            netMutexLock(rgLogOutputMutex);
             printf(FATAL_COLOR "[%s] [FATAL] %s" RESET_COLOR "\n", timeStr, msg);
-            pthread_mutex_unlock(&rgLogOutputMutex);
+            netMutexUnlock(rgLogOutputMutex);
         }
         writeToFile("FATAL", msg);
     }
@@ -81,9 +81,9 @@ void logOutputErrorConsoleCharString(const char *msg)
         {
             char timeStr[100];
             formatCurrentTime(timeStr, sizeof(timeStr));
-            pthread_mutex_lock(&rgLogOutputMutex);
+            netMutexLock(rgLogOutputMutex);
             printf(ERROR_COLOR "[%s] [ERROR] %s" RESET_COLOR "\n", timeStr, msg);
-            pthread_mutex_unlock(&rgLogOutputMutex);
+            netMutexUnlock(rgLogOutputMutex);
         }
         writeToFile("ERROR", msg);
     }
@@ -98,9 +98,9 @@ void logOutputWarnConsoleCharString(const char *msg)
         {
             char timeStr[100];
             formatCurrentTime(timeStr, sizeof(timeStr));
-            pthread_mutex_lock(&rgLogOutputMutex);
+            netMutexLock(rgLogOutputMutex);
             printf(WARN_COLOR "[%s] [WARN] %s" RESET_COLOR "\n", timeStr, msg);
-            pthread_mutex_unlock(&rgLogOutputMutex);
+            netMutexUnlock(rgLogOutputMutex);
         }
         writeToFile("WARN", msg);
     }
@@ -115,9 +115,9 @@ void logOutputInfoConsoleCharString(const char *msg)
         {
             char timeStr[100];
             formatCurrentTime(timeStr, sizeof(timeStr));
-            pthread_mutex_lock(&rgLogOutputMutex);
+            netMutexLock(rgLogOutputMutex);
             printf(INFO_COLOR "[%s] [INFO] %s" RESET_COLOR "\n", timeStr, msg);
-            pthread_mutex_unlock(&rgLogOutputMutex);
+            netMutexUnlock(rgLogOutputMutex);
         }
         writeToFile("INFO", msg);
     }
@@ -132,9 +132,9 @@ void logOutputDebugConsoleCharString(const char *msg)
         {
             char timeStr[100];
             formatCurrentTime(timeStr, sizeof(timeStr));
-            pthread_mutex_lock(&rgLogOutputMutex);
+            netMutexLock(rgLogOutputMutex);
             printf(DEBUG_COLOR "[%s] [DEBUG] %s" RESET_COLOR "\n", timeStr, msg);
-            pthread_mutex_unlock(&rgLogOutputMutex);
+            netMutexUnlock(rgLogOutputMutex);
         }
         writeToFile("DEBUG", msg);
     }

@@ -2,7 +2,7 @@
 
 C/C++17 从零实现的 TCP / TLS 端口转发代理。不含任何第三方框架，只依赖 `libyaml-cpp`（配置解析）和 `OpenSSL`（TLS），单 CMake 目标 `SimpleProxy`，单可执行文件。
 
-**仅支持 Linux**（直接依赖 `unistd.h` / `sys/epoll.h` / `sys/socket.h` / `sys/resource.h`）。
+**支持 Windows 与 Linux**。平台差异全部收敛在 `src/Platform/`（`Linux/` 与 `Windows/` 各一套实现），业务代码里没有 `#ifdef _WIN32`。详细差异对照见 [`document/platform.md`](document/platform.md)。
 
 ## 特性
 
@@ -30,7 +30,7 @@ C/C++17 从零实现的 TCP / TLS 端口转发代理。不含任何第三方框�
 
 - **两端独立握手**：对客户端 `SSL_accept`、对后端 `SSL_connect`，两端证书链、协议版本、密码套件可以各自独立配置。既能对外提供一个统一证书，又能连到同样跑 TLS 的内网后端——stunnel 之类的纯 TCP 透传做不到对后端握手，nginx 反代还得单独配上游 `proxy_ssl_*`。
 - **客户端 SNI 透传**：`sni` 留空时代理把客户端握手带来的 SNI 原样发给后端。多租户 / CDN / 同证书多域名场景下，后端仍能按主机名分流。
-- **后端证书强制校验**：`SSL_VERIFY_PEER` + 系统信任库，并对 SNI 做主机名校验。配置被判定无效时会**显式告警**，不会悄悄降级成"只验链不验主机名"。
+- **后端证书强制校验**：`SSL_VERIFY_PEER` + 系统信任库 + `client.tls.cert` 指定的 CA，并对 SNI 做主机名校验。配置被判定无效时会**显式告警**，不会悄悄降级成"只验链不验主机名"。
 
 ### 控制能力是内建的，不是外挂
 
@@ -54,52 +54,117 @@ C/C++17 从零实现的 TCP / TLS 端口转发代理。不含任何第三方框�
 
 ## 环境依赖
 
-三个 `find_package` 在 `CMakeLists.txt` 里都是 `REQUIRED`，缺任意一个 configure 就会失败：
+| 依赖 | 用途 | 平台 |
+| --- | --- | --- |
+| `yaml-cpp` | YAML 配置解析 | 两平台必需（`REQUIRED`） |
+| `OpenSSL` | `SSL` + `Crypto` | 两平台必需（`REQUIRED`） |
+| pthreads | 线程 | 仅 Linux（Windows 走 `CRITICAL_SECTION`） |
+
+Linux：
 
 ```bash
 sudo apt install build-essential cmake libyaml-cpp-dev libssl-dev
 ```
 
-- `Threads`（pthread）
-- `yaml-cpp` —— 配置解析
-- `OpenSSL` —— `SSL` + `Crypto`
+Windows 走 vcpkg（见下方编译一节）：
 
-> 仓库里的 `vcpkg.json` / `vcpkg-configuration.json` 只是依赖清单（`openssl`、`yaml-cpp`），Linux 构建走系统包，不经过 vcpkg。
+```powershell
+C:\vcpkg\scripts\bootstrap-vcpkg.bat -disableMetrics
+```
+
+> 仓库里的 `vcpkg.json` / `vcpkg-configuration.json` 是依赖清单（`openssl`、`yaml-cpp`）。Linux 构建走系统包，不经过 vcpkg。
 
 ## 编译
 
-**默认构建类型是 Debug（`-O0 -g`）**。任何时延 / 吞吐相关的结论都必须显式用 `Release`（`-O3 -DNDEBUG -funroll-loops -ftree-vectorize`）。
+**默认构建类型是 Debug**。任何时延 / 吞吐相关的结论都必须显式用 `Release`。
 
-Debug：
+可用构建类型：`Debug` / `Release` / `RelWithDebInfo` / `MinSizeRel`。
 
-```bash
-mkdir -p build && cd build
-cmake ..
-make -j$(nproc)
-```
+> **GLOB 陷阱**：`CMakeLists.txt` 用 `file(GLOB_RECURSE ...)` 收集源文件。新增 / 删除 / 重命名源文件后**必须重新执行 configure**（或删掉 `CMakeCache.txt`），只跑增量构建不会生效。
 
-Release：
+### Linux
 
 ```bash
 mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
+cmake -DCMAKE_BUILD_TYPE=Release ..    # 省略即 Debug
 make -j$(nproc)
 ```
 
-可用的构建类型：`Debug` / `Release` / `RelWithDebInfo` / `MinSizeRel`。
+Debug 用 `-O0 -g`，Release 用 `-O3 -DNDEBUG -funroll-loops -ftree-vectorize`。产物 `build/SimpleProxy`。
 
-> **GLOB 陷阱**：`CMakeLists.txt` 用 `file(GLOB_RECURSE ...)` 收集源文件。新增 / 删除 / 重命名源文件后**必须重新执行 `cmake ..`**（或删掉 `CMakeCache.txt`），只跑 `make` 不会生效。
+### Windows（MSVC）
+
+**1. 装依赖**。仓库用 `vcpkg.json` 声明 `openssl` 和 `yaml-cpp`：
+
+```powershell
+git clone https://github.com/microsoft/vcpkg C:\vcpkg
+C:\vcpkg\scripts\bootstrap-vcpkg.bat -disableMetrics
+```
+
+依赖装好后产物在 `vcpkg_installed\<triplet>\`，**必须告诉 CMake 去哪找**：
+
+```powershell
+cd C:\Users\ZYLQQ\Project\C++\SimpleProxy-V2
+
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 `
+  "-DCMAKE_PREFIX_PATH=$PWD\vcpkg_installed\x64-windows-static-md"
+
+cmake --build build --config Release
+```
+
+Debug 把 `--config Release` 换成 `--config Debug`。产物 `build\Release\SimpleProxy.exe`。
+
+也可以走 vcpkg toolchain，让 vcpkg 统一管依赖：
+
+```powershell
+$env:VCPKG_ROOT = "C:\vcpkg"
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64 -T vcpkg=x64-windows-static-md
+cmake --build build --config Release
+```
+
+**2. 三个容易踩的点**：
+
+- **不要传 `-DCMAKE_BUILD_TYPE`。** Visual Studio 生成器是**多配置**的，构建类型在 build 阶段用 `--config` 选。传了会被记成 `CMAKE_BUILD_TYPE:UNINITIALIZED=Release`，项目根本不认。
+- **不要用 `make`。** VS 生成器不产 Makefile，没有 make 可调。`$(nproc)` 也是 bash 语法，PowerShell 不认。
+- **PowerShell 里调用带引号的可执行文件路径要加调用运算符 `&`**，否则后面的 `-D...` 会被解析成意外 token。
+
+**3. `CMAKE_PREFIX_PATH` 为什么是必需的**
+
+`CMakeLists.txt` 里 `find_package(yaml-cpp REQUIRED)` / `find_package(OpenSSL REQUIRED)` 需要找到它们的 CMake config。Linux 上这些在系统包路径里，CMake 默认就能找到；Windows 上默认路径是 C 盘 Program Files，**不会自动去 `vcpkg_installed` 里找**。不指就会报：
+
+```
+CMake Error at CMakeLists.txt:11 (find_package):
+  Could not find a package configuration file provided by "yaml-cpp"
+```
+
+**4. 关于 `vcpkg_installed\<triplet>`**
+
+triplet 必须和生成器匹配：`-A x64` + MSVC 对应 `x64-windows-static-md`。装了别的 triplet 会出现 `LNK2038`（CRT 不匹配）或符号找不到。
+
+**5. 编码**：源码是 UTF-8 **无 BOM**，MSVC 默认按系统 ANSI 代码页读（中文系统上是 GBK），中文注释会破坏预处理。`CMakeLists.txt` 里已经加了 `/utf-8`，正常构建不需要额外操作；如果看到满屏 `C4819` 加上"某变量未声明"，就是这一条没生效。
+
+编译期常见错误与更多说明见 [`document/build.md`](document/build.md)。
 
 ## 运行
 
 ```bash
+# Linux
 ./build/SimpleProxy [-c config.yml]
+```
+
+```powershell
+# Windows
+.\build\Release\SimpleProxy.exe [-c config.yml]
 ```
 
 - `-c <file>` 指定配置文件，默认 `./config.yml`
 - `-h` / `--help` 打印用法
 - 启动时读取配置、尝试把 `RLIMIT_NOFILE` 提升到 `65536`（受 `rlim_max` 限制，失败只打 WARN）
 - 主线程阻塞在 `std::cin`，**输入 `exit` 回车或按 Ctrl+C 优雅退出**：关监听 fd → 等任务排空 → 线程池 shutdown → 释放 TLS 资源
+
+> **Windows 上优先用 `exit` 回车退出。** Ctrl+C 不一定能打断阻塞在 `std::cin` 的主线程，可能表现为进程卡住不退出。
+>
+> **配置里的相对路径按进程 CWD 解析**，不是按配置文件所在目录。用相对路径时要从那个目录启动代理。测试场景见 [`test/`](test/)。
 
 以下配置错误**启动即 FATAL 退出**，不会静默降级：
 
@@ -169,7 +234,8 @@ openssl s_client -connect 127.0.0.1:9800 -servername localhost
 **代理是终止 TLS，不是原始字节透传**：对客户端完成 `SSL_accept` 之后，再对后端独立完成一次 `SSL_connect`，两个 `SSL` 之间转发解密后的明文载荷。因此后端也必须是 TLS 服务，且代理需要自己的证书和私钥。
 
 - **证书与私钥**：`server.tls.cert` 和 `server.tls.privkey`（规范键是 `privkey`；旧的 `key` 仍兼容，读到时打 deprecation 警告）。文件不存在会被清空并打 ERROR，随后所有握手失败。
-- **后端证书校验**：固定用**系统信任库**（`SSL_CTX_set_default_verify_paths`）+ `SSL_VERIFY_PEER`。`client.tls.cert`（自定义 CA）是**死配置**，从未被读取。内网自签 CA 必须装进系统信任库，否则全部握手失败。系统信任库加载失败时**直接拒绝建连**（返回 `-1`），不会退化成"不校验"。
+- **后端证书校验**：固定 `SSL_VERIFY_PEER`。信任库 = OpenSSL 默认路径（`SSL_CTX_set_default_verify_paths`）+ `client.tls.cert` 指定的 CA 文件（**追加，不是替换**，所以配了自签 CA 之后公共 CA 依然能用）。内网自签 CA 用 `client.tls.cert` 指向即可，不必装进系统信任库。系统信任库加载失败时**直接拒绝建连**（返回 `-1`），不会退化成"不校验"。
+- ⚠️ **`SSL_CTX_set_default_verify_paths()` 只要"目录存在"就返回成功，哪怕里面一张 CA 都没有。** 很多 Windows 部署上它的默认路径（`%COMMONFILES%\SSL\certs`、`cert.pem`）是空的，于是所有后端握手都以 `certificate verify failed` 失败而函数返回成功。访问公网站点时**必须配 `client.tls.cert` 指向一个真正的 CA bundle**（几百 KB / 上百张证书；单张自签证书只有 1 KB 上下，不能用它）。
 - **SNI**：`client.tls.sni` 为空串 = 透传客户端握手带来的 SNI。同时用于后端证书的主机名校验（`SSL_set1_host`）。
   - **必须写成 `sni: ""`，不能只写 `sni:`**。yaml-cpp 的 `as<std::string>(fallback)` 对 null 节点返回的是字面量字符串 `"null"` 而不是 `fallback`，所以裸键会被当成 SNI = `null`：既不透传客户端 SNI，又强制要求后端证书对 `null` 这个主机名有效，结果是**每条连接握手都失败且没有任何告警**。见下方「已知限制」。
   - `sni` 被填成 `0.0.0.0` / `localhost` → 判为无效（SNI 本来就不能是地址），**主机名校验会失效**，且每条连接打 WARN。
@@ -302,7 +368,7 @@ server:
 | `socket.bufferSize` | int | `8192` | **客户端 → 后端**方向的转发缓冲 |
 | `tls.sni` | string | `""` | **必须显式写 `""`**：裸键 `sni:` 会被 yaml-cpp 读成字面量 `"null"`，导致后端握手全部失败。为空串则透传客户端握手 SNI；同时用于后端证书主机名校验。`0.0.0.0` / `localhost` 会被判为无效并**告警**，此时主机名校验不生效 |
 | `tls.hostname` | string | `""` | **死配置**，从未被读取 |
-| `tls.cert` | string | `""` | **死配置**，后端证书固定用系统信任库 |
+| `tls.cert` | string | `""` | 后端 CA 文件路径（**追加**到信任库，不是替换）。文件不存在则清空并报错。留空则只依赖 OpenSSL 默认信任库（`SSL_CERT_FILE` / `OPENSSLDIR`），Windows 上默认为空 |
 
 > 拼写错误同属对外契约，改名会破坏已有配置：`minWokers` / `maxWokers`、`client.hostname` 的历史拼写、`server.tls.key` 兼容别名。
 
@@ -310,13 +376,15 @@ server:
 
 ## 已知限制
 
-- **仅 Linux**，无法在 Windows / macOS 上编译运行。
+- **只支持 IPv4**。地址结构是 `sockaddr_in`，没有 IPv6 支持。
+- **macOS 未适配**。`src/Platform/` 下只有 `Linux/` 和 `Windows/`，没有第三份实现。
+- **Linux 侧尚未实际验证**。改造写成行为等价重构并逐条复核过源码，但本机没有 gcc，编译与冒烟都没跑过。Windows x64 已验证。
 - **yaml-cpp 的 null 字符串陷阱**：`node.as<std::string>(fallback)` 在节点为 null（YAML 里写成裸键 `key:`）时返回的是**字面量字符串 `"null"`**，不是 `fallback`。受影响的键：`client.tls.sni`、`client.tls.hostname`、`client.tls.cert`、`server.tls.cert`、`server.tls.privkey`、`config.log.filePath`。
   - `client.tls.sni` 是唯一会造成**静默功能失效**的：它会真的被当成 SNI `null` 发给后端，并强制校验后端证书对 `null` 有效，表现为"TLS 模式所有连接握手失败"且无告警。**要留空必须写 `sni: ""`。**
   - 其余几项要么随后被 `std::filesystem::exists` 判为不存在而清空（`server.tls.cert` / `privkey`），要么本来就是死配置。
   - 非字符串类型（`int` / `bool`）的 `as<T>(fallback)` 没有这个问题：键缺失或解码失败都会正确回落到 `fallback`。
 - **`ioUseMode` 只实现了 `none`**。`select` / `poll` / `epoll` 三个值在启动时就被拒绝，不会静默走错分支。
-- **死配置**（解析了但代码里从未读取）：`config.socket.noBlockReadOrWrite`、`config.socket.noBlockConnect`、`config.tls.noBlockReadOrWrite`、`config.tls.noBlockConnect`、`client.tls.hostname`、`client.tls.cert`。
+- **死配置**（解析了但代码里从未读取）：`config.socket.noBlockReadOrWrite`、`config.socket.noBlockConnect`、`config.tls.noBlockReadOrWrite`、`config.tls.noBlockConnect`、`client.tls.hostname`。
 - **线程池容量换算**：`setMin/setMaxThreadNumber` 内部各 `+1`，`init()` 又 `setPoolSize(minWokers + 1)`，所以
   - 实际初始 worker = **`minWokers + 2`**
   - 实际上限 = **`maxWokers + 1`**
@@ -350,6 +418,7 @@ src/
 ├── main.cpp                 入口：参数、配置加载校验、启动/关闭
 ├── headfile.h               统一头（所有 .c/.cpp 只 include 它）
 ├── define.h                 宏：I/O 模式、日志级别、后端选择策略
+├── Platform/                跨平台适配层：PlatformBase.h + Linux/ + Windows/
 ├── Global/                  全局状态（C 与 C++ 各一份）
 ├── Log/                     日志（C 与 C++ 各一套同名 API）
 ├── ProtocolServer/          裸系统调用封装：nSocket(明文) / nTls(TLS)
@@ -357,7 +426,10 @@ src/
 └── Callback/                业务层：防火墙、后端选择、连接生命周期、转发
 ```
 
+完整结构与各文件职责见 [document/structure.md](document/structure.md)。
+
 ## 相关文档
 
+- [`document/`](document/) —— 技术文档：目录结构、架构与调用链、跨平台适配层、构建、验证
 - [`AGENTS.md`](AGENTS.md) —— 给 AI agent 的开发约定：构建红线、内存与生命周期红线、配置键位
 - [`MISTAKE.md`](MISTAKE.md) —— 本仓库已核实**但尚未修复**的缺陷（含成因与证据）；已修复的缺陷成因保留在 git 历史里

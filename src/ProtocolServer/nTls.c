@@ -41,6 +41,10 @@ bool configureClientContext(SSL_CTX *ctx)
 {
     SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
 
+    // 先装 OpenSSL 自己的默认信任库（受 SSL_CERT_FILE / OPENSSLDIR 影响）。
+    // 注意：这个函数"目录存在"就返回 1，哪怕目录里一张 CA 都没有 ——
+    // Windows 上默认路径经常是空的，此时下面所有后端握手都会以
+    // "certificate verify failed" 失败。所以它成功不代表信任库可用。
     if (!SSL_CTX_set_default_verify_paths(ctx))
     {
         // 拿不到信任库时 SSL_VERIFY_PEER 会让所有后端握手失败，
@@ -48,6 +52,30 @@ bool configureClientContext(SSL_CTX *ctx)
         logOutputErrorConsoleCharString("Error: Unable to load system certificate trust store, refusing to connect to backend without certificate verification");
         return false;
     }
+
+    // 再叠加配置指定的 CA 文件（client.tls.cert）。是"追加"不是"替换"，
+    // 所以配了自签 CA 之后公共 CA 依然能用。
+    // 这是自签 / 内网 CA 后端唯一可用的入口：OpenSSL 的默认路径在很多
+    // Windows 部署里是空的，靠它没法验任何东西。
+    if (gClientTlsCertFileChar != NULL && gClientTlsCertFileChar[0] != '\0')
+    {
+        if (!SSL_CTX_load_verify_locations(ctx, gClientTlsCertFileChar, NULL))
+        {
+            char err[512];
+            unsigned long e = ERR_get_error();
+            char errBuf[256];
+            ERR_error_string_n(e, errBuf, sizeof(errBuf));
+            snprintf(err, sizeof(err),
+                     "Error: Unable to load client.tls.cert '%s' - %s",
+                     gClientTlsCertFileChar, errBuf);
+            logOutputErrorConsoleCharString(err);
+            ERR_print_errors_fp(stderr);
+            return false;
+        }
+        // 成功不在这里打日志：configureClientContext 每条连接都会调一次，
+        // 打日志会变成每连接一行。启动时 main.cpp 已经记过一次了。
+    }
+
     return true;
 }
 
@@ -64,24 +92,23 @@ static void listenSocketConnectIoNone(TlsSocketUpgradeCallback socketUpgradeTlsC
     while (rgTlsServerRun)
     {
         struct sockaddr_in clientAddr;
-        socklen_t clientLen = sizeof(clientAddr);
-        int clientFd = accept(rgTlsSocketServerFd, (struct sockaddr *)&clientAddr, &clientLen);
+        NET_SOCKLEN_T clientLen = sizeof(clientAddr);
+        SOCKET_T clientFd = accept(rgTlsSocketServerFd, (struct sockaddr *)&clientAddr, &clientLen);
 
-        if (clientFd >= 0)
+        if (netSocketValid(clientFd))
         {
             // 成功接受连接
             char clientIp[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &clientAddr.sin_addr, clientIp, sizeof(clientIp));
             int clientPort = ntohs(clientAddr.sin_port);
-            SocketClientInfo clientInfo = {
-                .fd = clientFd,
-                .addr = clientAddr,
-                .addr_len = clientLen,
-                .port = clientPort};
+            SocketClientInfo clientInfo;
+            memset(&clientInfo, 0, sizeof(clientInfo));
+            clientInfo.fd = clientFd;
+            clientInfo.addr = clientAddr;
+            clientInfo.addr_len = clientLen;
+            clientInfo.port = clientPort;
             strncpy(clientInfo.ip_str, clientIp, INET_ADDRSTRLEN - 1);
             clientInfo.ip_str[INET_ADDRSTRLEN - 1] = '\0';
-
-            // upgradeSocketToTlsConnect(clientFd, &clientInfo, socketCallback, tlsCallback);
 
             socketUpgradeTlsCallback(&clientInfo, tlsCallback);
 
@@ -89,31 +116,31 @@ static void listenSocketConnectIoNone(TlsSocketUpgradeCallback socketUpgradeTlsC
         }
 
         // accept 失败处理
-        if (errno == EWOULDBLOCK || errno == EAGAIN)
+        int acceptErr = netLastError();
+        if (netIsWouldBlock(acceptErr))
         {
             continue;
         }
 
         // 其他错误处理
-        switch (errno)
+        if (netIsInterrupted(acceptErr))
         {
-        case EINTR:
             // 被信号中断，继续循环
-            break;
-        case EMFILE:
+        }
+        else if (netIsFdExhausted(acceptErr))
+        {
             logOutputErrorConsoleCharString("Listen: too many open files, sleeping...");
-            break;
-        case ECONNABORTED:
+        }
+        else if (netIsAborted(acceptErr))
+        {
             logOutputDebugConsoleCharString("Listen: connection aborted before accept");
-            break;
-        default:
+        }
+        else
         {
             char errMsg[256];
             snprintf(errMsg, sizeof(errMsg), "Listen: accept failed (errno=%d): %s",
-                     errno, strerror(errno));
+                     acceptErr, netErrorString(acceptErr));
             logOutputErrorConsoleCharString(errMsg);
-            break;
-        }
         }
     }
 }
@@ -140,11 +167,11 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
         return -1;
     }
 
-    int sockFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockFd < 0)
+    SOCKET_T sockFd = socket(AF_INET, SOCK_STREAM, 0);
+    if (!netSocketValid(sockFd))
     {
         char errorMsg[256];
-        snprintf(errorMsg, sizeof(errorMsg), "Connect: socket() failed - %s", strerror(errno));
+        snprintf(errorMsg, sizeof(errorMsg), "Connect: socket() failed - %s", netErrorString(netLastError()));
         logOutputErrorConsoleCharString(errorMsg);
         return -1;
     }
@@ -154,46 +181,42 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(port);
+    serverAddr.sin_port = htons((u_short)port);
 
     if (strcmp(host, "0.0.0.0") == 0 || strcmp(host, "*") == 0)
     {
-        serverAddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        logOutputDebugConsoleCharString("Connect: connecting to 0.0.0.0 (any)");
+        // connect 语义上 0.0.0.0 就是本机回环，所以这里要填 LOOPBACK 而不是 INADDR_ANY。
+        // Linux 内核会把 connect 到 0.0.0.0 按 127.0.0.1 处理；Windows 不认，
+        // 会直接返回 WSAEADDRNOTAVAIL（"请求的地址无效"）。这里显式填 127.0.0.1 让两边一致。
+        // 注意：上面 initTlsServer 里的 bind 路径仍然用 INADDR_ANY，那是"监听所有网卡"，不要一起改。
+        serverAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        logOutputDebugConsoleCharString("Connect: connecting to 0.0.0.0, treated as localhost");
     }
     else if (strcmp(host, "127.0.0.1") == 0 || strcmp(host, "localhost") == 0)
     {
         serverAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         logOutputDebugConsoleCharString("Connect: connecting to localhost");
     }
-    else
+    else if (!netResolveIpv4(host, &serverAddr))
     {
-        if (inet_pton(AF_INET, host, &serverAddr.sin_addr) <= 0)
-        {
-            struct hostent *hostent = gethostbyname(host);
-            if (hostent == NULL)
-            {
-                char err[256];
-                snprintf(err, sizeof(err), "Connect: cannot resolve hostname '%s'", host);
-                logOutputErrorConsoleCharString(err);
-                close(sockFd);
-                return -1;
-            }
-            memcpy(&serverAddr.sin_addr, hostent->h_addr_list[0], hostent->h_length);
-            logOutputDebugConsoleCharString("Connect: hostname resolved");
-        }
+        char err[256];
+        snprintf(err, sizeof(err), "Connect: cannot resolve hostname '%s'", host);
+        logOutputErrorConsoleCharString(err);
+        netSocketClose(sockFd);
+        return -1;
     }
 
     char ipStr[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &serverAddr.sin_addr, ipStr, sizeof(ipStr));
     char msg[256];
-    snprintf(msg, sizeof(msg), "Connect: target IP %s, port %d", ipStr, port);
+    // 端口从 serverAddr 里取，不打印 port 变量：否则实际结构体里的端口被改错了也看不出来
+    snprintf(msg, sizeof(msg), "Connect: target IP %s, port %d", ipStr, ntohs(serverAddr.sin_port));
     logOutputDebugConsoleCharString(msg);
 
     if (gConfigTlsSocketIoUseMode != CONNECT_USE_IO_NONE)
     {
         logOutputErrorConsoleCharString("Connect: tls socket ioUseMode is not supported yet, only 'none' is implemented");
-        close(sockFd);
+        netSocketClose(sockFd);
         return -1;
     }
 
@@ -202,19 +225,17 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
         if (gConfigTlsConnectTimeoutMs > 0)
         {
             // 阻塞模式下设置收发超时
-            struct timeval tv;
-            tv.tv_sec = gConfigTlsConnectTimeoutMs / 1000;
-            tv.tv_usec = (gConfigTlsConnectTimeoutMs % 1000) * 1000;
-            if (setsockopt(sockFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
+            if (netSetSendTimeoutMs(sockFd, gConfigTlsConnectTimeoutMs) < 0)
             {
-                perror("Connect: setsockopt SO_SNDTIMEO");
-                close(sockFd);
+                logOutputErrorConsoleCharString("Connect: set socket send timeout failed");
+                netSocketClose(sockFd);
                 return -1;
             }
-            if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+
+            if (netSetRecvTimeoutMs(sockFd, gConfigTlsConnectTimeoutMs) < 0)
             {
-                perror("Connect: setsockopt SO_RCVTIMEO");
-                close(sockFd);
+                logOutputErrorConsoleCharString("Connect: set socket recv timeout failed");
+                netSocketClose(sockFd);
                 return -1;
             }
             logOutputDebugConsoleCharString("Connect: set socket timeout");
@@ -229,7 +250,7 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
                 logOutputDebugConsoleCharString("Connect: connection established immediately");
                 break;
             }
-            else if (errno == EINPROGRESS)
+            else if (netIsInProgress(netLastError()))
             {
                 continue;
             }
@@ -242,30 +263,30 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
         if (isBreak)
         {
             char errMsg[256];
-            snprintf(errMsg, sizeof(errMsg), "Connect: connect() failed - %s", strerror(errno));
+            snprintf(errMsg, sizeof(errMsg), "Connect: connect() failed - %s", netErrorString(netLastError()));
             logOutputErrorConsoleCharString(errMsg);
-            close(sockFd);
+            netSocketClose(sockFd);
             return -1;
         }
     }
 
     // 获取本地地址信息
     struct sockaddr_in localAddr;
-    socklen_t localLen = sizeof(localAddr);
+    NET_SOCKLEN_T localLen = sizeof(localAddr);
     if (getsockname(sockFd, (struct sockaddr *)&localAddr, &localLen) < 0)
     {
         logOutputErrorConsoleCharString("Connect: getsockname failed");
-        close(sockFd);
+        netSocketClose(sockFd);
         return -1;
     }
 
     // 获取对端地址信息（可选）
     struct sockaddr_in peerAddr;
-    socklen_t peerLen = sizeof(peerAddr);
+    NET_SOCKLEN_T peerLen = sizeof(peerAddr);
     if (getpeername(sockFd, (struct sockaddr *)&peerAddr, &peerLen) < 0)
     {
         logOutputErrorConsoleCharString("Connect: getpeername failed");
-        close(sockFd);
+        netSocketClose(sockFd);
         return -1;
     }
 
@@ -281,7 +302,7 @@ static int connectTlsSocketServer(SocketClientInfo *clientInfo, const char *host
     clientInfo->port = ntohs(localAddr.sin_port);
 
     logOutputInfoConsoleCharString("Connect to server success");
-    return sockFd;
+    return (int)sockFd;
 }
 
 static bool isValidTlsHost(const char *host)
@@ -330,23 +351,23 @@ void initTlsServer()
     logOutputDebugConsoleCharString("Init: start init socket server");
 
     rgTlsSocketServerFd = socket(AF_INET, SOCK_STREAM, 0);
-    if (rgTlsSocketServerFd < 0)
+    if (!netSocketValid(rgTlsSocketServerFd))
     {
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: socket server failed: socket() error - %s", strerror(errno));
+        snprintf(error_msg, sizeof(error_msg), "Init: socket server failed: socket() error - %s", netErrorString(netLastError()));
         logOutputErrorConsoleCharString(error_msg);
         return;
     }
 
     // 设置端口重用
     int opt = 1;
-    if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_REUSEADDR, (const char *)&opt, sizeof(opt)) < 0)
     {
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: setsockopt(SO_REUSEADDR) failed - %s", strerror(errno));
+        snprintf(error_msg, sizeof(error_msg), "Init: setsockopt(SO_REUSEADDR) failed - %s", netErrorString(netLastError()));
         logOutputErrorConsoleCharString(error_msg);
-        close(rgTlsSocketServerFd);
-        rgTlsSocketServerFd = -1;
+        netSocketClose(rgTlsSocketServerFd);
+        rgTlsSocketServerFd = SOCKET_INVALID;
         return;
     }
     logOutputDebugConsoleCharString("Init: SO_REUSEADDR set");
@@ -355,7 +376,7 @@ void initTlsServer()
     memset(&rgTlsServerAddr, 0, sizeof(rgTlsServerAddr));
     rgTlsServerAddr.sin_family = AF_INET;
 
-    // 解析主机地址
+    // 解析主机地址：先看是不是特殊写法，再交给 getaddrinfo 统一处理
     if (strcmp(gServerHostChar, "0.0.0.0") == 0 || strcmp(gServerHostChar, "*") == 0)
     {
         rgTlsServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -366,27 +387,14 @@ void initTlsServer()
         rgTlsServerAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         logOutputDebugConsoleCharString("Init: binding to localhost");
     }
-    else
+    else if (!netResolveIpv4(gServerHostChar, &rgTlsServerAddr))
     {
-        // 尝试解析为 IPv4 点分十进制
-        if (inet_pton(AF_INET, gServerHostChar, &rgTlsServerAddr.sin_addr) <= 0)
-        {
-            // 不是 IP 地址，尝试域名解析
-            struct hostent *hostent = gethostbyname(gServerHostChar);
-            if (hostent == NULL)
-            {
-                char err[256];
-                snprintf(err, sizeof(err), "Init: cannot resolve hostname '%s'", gServerHostChar);
-                logOutputErrorConsoleCharString(err);
-                close(rgTlsSocketServerFd);
-                rgTlsSocketServerFd = -1;
-                return;
-            }
-            // 复制第一个 IPv4 地址
-            memcpy(&rgTlsServerAddr.sin_addr, hostent->h_addr_list[0], hostent->h_length);
-            logOutputDebugConsoleCharString("Init: hostname resolved");
-        }
-        // inet_pton 成功则地址已填充
+        char err[256];
+        snprintf(err, sizeof(err), "Init: cannot resolve hostname '%s'", gServerHostChar);
+        logOutputErrorConsoleCharString(err);
+        netSocketClose(rgTlsSocketServerFd);
+        rgTlsSocketServerFd = SOCKET_INVALID;
+        return;
     }
 
     // 输出最终绑定的 IP
@@ -397,14 +405,14 @@ void initTlsServer()
     logOutputDebugConsoleCharString(msg);
 
     // 绑定端口
-    rgTlsServerAddr.sin_port = htons(gServerPort);
+    rgTlsServerAddr.sin_port = htons((u_short)gServerPort);
     if (bind(rgTlsSocketServerFd, (struct sockaddr *)&rgTlsServerAddr, sizeof(rgTlsServerAddr)) < 0)
     {
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: bind(%s:%d) failed - %s", ipStr, gServerPort, strerror(errno));
+        snprintf(error_msg, sizeof(error_msg), "Init: bind(%s:%d) failed - %s", ipStr, gServerPort, netErrorString(netLastError()));
         logOutputErrorConsoleCharString(error_msg);
-        close(rgTlsSocketServerFd);
-        rgTlsSocketServerFd = -1;
+        netSocketClose(rgTlsSocketServerFd);
+        rgTlsSocketServerFd = SOCKET_INVALID;
         return;
     }
     logOutputDebugConsoleCharString("Init: bind success");
@@ -413,10 +421,10 @@ void initTlsServer()
     if (listen(rgTlsSocketServerFd, backlog) < 0)
     {
         char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Init: listen() failed - %s", strerror(errno));
+        snprintf(error_msg, sizeof(error_msg), "Init: listen() failed - %s", netErrorString(netLastError()));
         logOutputErrorConsoleCharString(error_msg);
-        close(rgTlsSocketServerFd);
-        rgTlsSocketServerFd = -1;
+        netSocketClose(rgTlsSocketServerFd);
+        rgTlsSocketServerFd = SOCKET_INVALID;
         return; // 注意：此时不设置 rgSocketInit = true
     }
     logOutputDebugConsoleCharString("Init: listen success");
@@ -430,7 +438,7 @@ void listenTlsServer(TlsSocketUpgradeCallback socketUpgradeTlsCallback, TlsClien
 {
     logOutputDebugConsoleCharString("Listen: start tls listen socket server");
 
-    if (rgTlsSocketServerFd < 0 || rgTlsInit == false)
+    if (!netSocketValid(rgTlsSocketServerFd) || rgTlsInit == false)
     {
         logOutputErrorConsoleCharString("Listen tls server have a mistake: tls server not init");
         return;
@@ -458,23 +466,19 @@ void listenTlsServer(TlsSocketUpgradeCallback socketUpgradeTlsCallback, TlsClien
     {
         if (gConfigTlsAcceptTimeoutMs > 0)
         {
-            struct timeval tv;
-            tv.tv_sec = gConfigTlsAcceptTimeoutMs / 1000;
-            tv.tv_usec = (gConfigTlsAcceptTimeoutMs % 1000) * 1000;
-
-            if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) < 0)
+            if (netSetSendTimeoutMs(rgTlsSocketServerFd, gConfigTlsAcceptTimeoutMs) < 0)
             {
-                perror("Listen: setsockopt SO_SNDTIMEO");
-                close(rgTlsSocketServerFd);
-                rgTlsSocketServerFd = -1;
+                logOutputErrorConsoleCharString("Listen: set listen socket send timeout failed");
+                netSocketClose(rgTlsSocketServerFd);
+                rgTlsSocketServerFd = SOCKET_INVALID;
                 return;
             }
 
-            if (setsockopt(rgTlsSocketServerFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
+            if (netSetRecvTimeoutMs(rgTlsSocketServerFd, gConfigTlsAcceptTimeoutMs) < 0)
             {
-                perror("Listen: setsockopt SO_RCVTIMEO");
-                close(rgTlsSocketServerFd);
-                rgTlsSocketServerFd = -1;
+                logOutputErrorConsoleCharString("Listen: set listen socket recv timeout failed");
+                netSocketClose(rgTlsSocketServerFd);
+                rgTlsSocketServerFd = SOCKET_INVALID;
                 return;
             }
         }
@@ -488,11 +492,11 @@ void closeTlsServer()
     rgTlsServerRun = false;
     // 必须真的关掉监听 fd：accept 循环阻塞在 accept() 上，仅置标志位无法唤醒它，
     // 后续线程池 shutdown() 里的 join() 会永久阻塞。shutdown() 用于唤醒阻塞的 accept。
-    if (rgTlsSocketServerFd >= 0)
+    if (netSocketValid(rgTlsSocketServerFd))
     {
-        shutdown(rgTlsSocketServerFd, SHUT_RDWR);
-        close(rgTlsSocketServerFd);
-        rgTlsSocketServerFd = -1;
+        netShutdownBoth(rgTlsSocketServerFd);
+        netSocketClose(rgTlsSocketServerFd);
+        rgTlsSocketServerFd = SOCKET_INVALID;
     }
     logOutputInfoConsoleCharString("TLS Server shut down.");
 }
@@ -508,7 +512,7 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
     memset(clientInfo, 0, sizeof(TlsClientInfo));
 
     SocketClientInfo socketInfo = {0};
-    if (connectTlsSocketServer(&socketInfo, host, port) < 0 || socketInfo.fd < 0)
+    if (connectTlsSocketServer(&socketInfo, host, port) < 0 || !netSocketValid(socketInfo.fd))
     {
         logOutputErrorConsoleCharString("connectTlsServer: connectSocketServer failed");
         return -1;
@@ -518,14 +522,14 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
     if (!ctx)
     {
         logOutputErrorConsoleCharString("connectTlsServer: createContext failed");
-        close(socketInfo.fd);
+        netSocketClose(socketInfo.fd);
         return -1;
     }
     if (configureClientContext(ctx) == false)
     {
         logOutputErrorConsoleCharString("connectTlsServer: configureClientContext failed");
         SSL_CTX_free(ctx);
-        close(socketInfo.fd);
+        netSocketClose(socketInfo.fd);
         return -1;
     }
 
@@ -534,10 +538,12 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
     {
         logOutputErrorConsoleCharString("connectTlsServer: SSL_new failed");
         SSL_CTX_free(ctx);
-        close(socketInfo.fd);
+        netSocketClose(socketInfo.fd);
         return -1;
     }
-    SSL_set_fd(ssl, socketInfo.fd);
+    // SSL_set_fd 的形参是 int：OpenSSL 在所有平台都用 int 接 fd。
+    // Windows 的 SOCKET 是 64 位句柄，这里必须显式收窄 —— 实际句柄值远小于 INT_MAX。
+    SSL_set_fd(ssl, (int)socketInfo.fd);
 
     // SNI 与证书主机名校验：配置的 sni 被 isValidTlsHost 判为无效时必须告警，
     // 否则主机名校验会在无任何提示的情况下静默失效。
@@ -569,7 +575,7 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
         logOutputErrorConsoleCharString("Connect: tls socket ioUseMode is not supported yet, only 'none' is implemented");
         SSL_free(ssl);
         SSL_CTX_free(ctx);
-        close(socketInfo.fd);
+        netSocketClose(socketInfo.fd);
         return -1;
     }
 
@@ -591,23 +597,30 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
             if (sslConnErr == SSL_ERROR_WANT_READ || sslConnErr == SSL_ERROR_WANT_WRITE)
             {
                 char msg[256];
-                snprintf(msg, sizeof(msg), "SSL_connect select error: %s - %d", strerror(errno), errno);
+                snprintf(msg, sizeof(msg), "SSL_connect select error: %s - %d", netErrorString(netLastError()), netLastError());
                 logOutputErrorConsoleCharString(msg);
                 break;
             }
             else if (sslConnErr == SSL_ERROR_SYSCALL)
             {
                 // 检查系统调用的errno是否代表超时
-                if (errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK)
+                int syscallErr = netLastError();
+                if (syscallErr == 0)
                 {
                     char msg[128];
-                    snprintf(msg, sizeof(msg), "SSL_connect syscall timeout: errno=%d", errno);
+                    snprintf(msg, sizeof(msg), "SSL_connect syscall closed: no error reported");
+                    logOutputErrorConsoleCharString(msg);
+                }
+                else if (netIsTimeout(syscallErr) || netIsWouldBlock(syscallErr))
+                {
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "SSL_connect syscall timeout: errno=%d", syscallErr);
                     logOutputErrorConsoleCharString(msg);
                 }
                 else
                 {
                     char msg[128];
-                    snprintf(msg, sizeof(msg), "SSL_connect syscall error: errno=%d", errno);
+                    snprintf(msg, sizeof(msg), "SSL_connect syscall error: errno=%d", syscallErr);
                     logOutputErrorConsoleCharString(msg);
                 }
                 break;
@@ -632,7 +645,7 @@ int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *hos
             logOutputErrorConsoleCharString(error_string);
             SSL_free(ssl);
             SSL_CTX_free(ctx);
-            close(socketInfo.fd);
+            netSocketClose(socketInfo.fd);
             return -1;
         }
     }

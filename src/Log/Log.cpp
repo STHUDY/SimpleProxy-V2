@@ -16,7 +16,7 @@ static std::string getCurrentTime()
     char time_str[100];
     time_t now = time(0);
     struct tm tm_info;
-    if (localtime_r(&now, &tm_info) == NULL)
+    if (!netLocalTime(&tm_info, &now))
     {
         return std::string("0000-00-00 00:00:00");
     }
@@ -32,7 +32,7 @@ static void writeToFile(const std::string &level, const std::string &msg)
 
     std::string outputMsg = "[" + getCurrentTime() + "] [" + level + "] " + msg;
 
-    pthread_mutex_lock(&rgLogWriteFileMutex);
+    netMutexLock(rgLogWriteFileMutex);
     if (rgLogFileOpen == NULL)
     {
         rgLogFileOpen = fopen(gConfigLogFileChar, "a");
@@ -40,7 +40,7 @@ static void writeToFile(const std::string &level, const std::string &msg)
         {
             // 无法打开文件，禁用文件日志并输出错误到控制台（避免递归）
             gConfigLogEnbaleFile = false;
-            pthread_mutex_unlock(&rgLogWriteFileMutex);
+            netMutexUnlock(rgLogWriteFileMutex);
 
             // 直接输出到控制台（不使用文件日志，防止递归）
             std::cerr << "[" << getCurrentTime() << "] [ERROR] "
@@ -51,16 +51,16 @@ static void writeToFile(const std::string &level, const std::string &msg)
     }
     fprintf(rgLogFileOpen, "%s\n", outputMsg.c_str());
     fflush(rgLogFileOpen);
-    pthread_mutex_unlock(&rgLogWriteFileMutex);
+    netMutexUnlock(rgLogWriteFileMutex);
 }
 
 // 控制台输出加锁，保证时间戳与正文不被其它线程的输出穿插
 static void outputConsole(const std::string &color, const std::string &level, const std::string &msg)
 {
     std::string outputMsg = "[" + getCurrentTime() + "] [" + level + "] " + msg;
-    pthread_mutex_lock(&rgLogOutputMutex);
+    netMutexLock(rgLogOutputMutex);
     std::cout << color << outputMsg << RESET_COLOR << std::endl;
-    pthread_mutex_unlock(&rgLogOutputMutex);
+    netMutexUnlock(rgLogOutputMutex);
 }
 
 // ---------- FATAL ----------

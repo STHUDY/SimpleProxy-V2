@@ -10,9 +10,9 @@ extern "C"
 
     typedef struct TlsClientInfo
     {
-        int fd;                       // 套接字文件描述符
+        SOCKET_T fd;                  // 套接字；Windows 上是 64 位句柄，不能用 int 存
         struct sockaddr_in addr;      // 客户端地址
-        socklen_t addr_len;           // 地址长度
+        NET_SOCKLEN_T addr_len;       // 地址长度
         char ip_str[INET_ADDRSTRLEN]; // IP字符串
         int port;                     // 端口号
         SSL *ssl;                     // TLS/SSL对象
@@ -21,7 +21,8 @@ extern "C"
 
     typedef struct SocketClientInfo SocketClientInfo;
 
-    typedef void (*TlsClientCallback)(int clientFd, TlsClientInfo *clientInfo);
+    // 回调只收 clientInfo：clientInfo->fd 就是握手用的那个 fd
+    typedef void (*TlsClientCallback)(TlsClientInfo *clientInfo);
     typedef void (*TlsSocketUpgradeCallback)(SocketClientInfo *clientInfo, TlsClientCallback tlsCallback);
 
     SSL_CTX *createContext(bool isServer);
@@ -36,6 +37,7 @@ extern "C"
 
     void closeTlsServer();
 
+    // 成功返回 0 并填充 clientInfo，失败返回 -1
     int connectTlsServer(TlsClientInfo *clientInfo, const char *sni, const char *host, int port);
 
     void closeTlsResource();

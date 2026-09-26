@@ -24,7 +24,7 @@ config:
     enable: true
     console: true
     file: false
-    level: info
+    level: debug
     filePath: "./proxy.log"
   threadpool:
     minWokers: 10
@@ -51,6 +51,6 @@ client:
   socket:
     bufferSize: 1024
   tls:
-    hostname: 0.0.0.0 # 已废弃，未被使用
-    sni: # SNI扩展，留空则透传客户端握手SNI；0.0.0.0/localhost 无法作为SNI，会导致后端证书主机名校验被关闭
-    cert: # CA证书文件路径（已废弃，未被使用）
+    hostname: "" # 已废弃，未被使用（注意：要写 "" 而不是裸键，裸键会被 yaml-cpp 读成字符串 "null"）
+    sni: "" # SNI扩展，留空则透传客户端握手SNI；0.0.0.0/localhost 无法作为SNI，会导致后端证书主机名校验被关闭
+    cert: "" # 后端 CA 证书文件路径（自签/内网 CA 必填；留空则只用 OpenSSL 默认信任库）

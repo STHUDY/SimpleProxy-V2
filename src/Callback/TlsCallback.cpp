@@ -2,18 +2,14 @@
 
 static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientCallback tlsCallback)
 {
-    int aSocket = aConnectInfo->fd;
+    SOCKET_T aSocket = aConnectInfo->fd;
 
     if (gConfigTlsSslIoUseMode == CONNECT_USE_IO_NONE)
     {
         if (gConfigTlsAcceptTimeoutMs > 0)
         {
-            struct timeval tv;
-            tv.tv_sec = gConfigTlsAcceptTimeoutMs / 1000;
-            tv.tv_usec = (gConfigTlsAcceptTimeoutMs % 1000) * 1000;
-
-            setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-            setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            netSetRecvTimeoutMs(aSocket, gConfigTlsAcceptTimeoutMs);
+            netSetSendTimeoutMs(aSocket, gConfigTlsAcceptTimeoutMs);
         }
 
         SSL_CTX *ctx = createContext(true);
@@ -22,7 +18,7 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
         {
             logOutputErrorConsole("Listen tls server have a mistake: configure server context error");
             SSL_CTX_free(ctx);
-            close(aSocket);
+            netSocketClose(aSocket);
             delete aConnectInfo;
             return;
         }
@@ -32,12 +28,14 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
         {
             logOutputErrorConsole("Listen tls server have a mistake: SSL_new error");
             SSL_CTX_free(ctx);
-            close(aSocket);
+            netSocketClose(aSocket);
             delete aConnectInfo;
             return;
         }
 
-        SSL_set_fd(ssl, aSocket);
+        // SSL_set_fd 的形参是 int：OpenSSL 在所有平台都用 int 接 fd。
+        // Windows 的 SOCKET 是 64 位句柄，这里必须显式收窄 —— 实际句柄值远小于 INT_MAX。
+        SSL_set_fd(ssl, (int)aSocket);
 
         int sslAccept = 0;
         int sslConnErr = 0;
@@ -56,7 +54,7 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
                 tlsClientInfo.addr_len = aConnectInfo->addr_len;
                 strncpy(tlsClientInfo.ip_str, aConnectInfo->ip_str, INET_ADDRSTRLEN);
                 tlsClientInfo.port = aConnectInfo->port;
-                tlsCallback(aSocket, &tlsClientInfo);
+                tlsCallback(&tlsClientInfo);
                 logOutputDebugConsole("TLS Accept success");
                 break;
             }
@@ -65,19 +63,23 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
 
             if (sslConnErr == SSL_ERROR_WANT_READ || sslConnErr == SSL_ERROR_WANT_WRITE)
             {
-                logOutputErrorConsole("SSL_accept select error: " + std::to_string(errno));
+                logOutputErrorConsole("SSL_accept select error: " + std::to_string(netLastError()));
                 break;
             }
             else if (sslConnErr == SSL_ERROR_SYSCALL)
             {
-                // 检查系统调用的errno是否代表超时
-                if (errno == ETIMEDOUT || errno == EAGAIN || errno == EWOULDBLOCK)
+                int syscallErr = netLastError();
+                if (syscallErr == 0)
                 {
-                    logOutputErrorConsole("SSL_accept syscall timeout: errno=" + std::to_string(errno));
+                    logOutputErrorConsole("SSL_accept syscall closed: no error reported");
+                }
+                else if (netIsTimeout(syscallErr) || netIsWouldBlock(syscallErr))
+                {
+                    logOutputErrorConsole("SSL_accept syscall timeout: errno=" + std::to_string(syscallErr));
                 }
                 else
                 {
-                    logOutputErrorConsole("SSL_accept syscall error: errno=" + std::to_string(errno));
+                    logOutputErrorConsole("SSL_accept syscall error: errno=" + std::to_string(syscallErr));
                 }
                 break;
             }
@@ -105,8 +107,8 @@ static void tlsSocketUpgradeTlsAccept(SocketClientInfo *aConnectInfo, TlsClientC
                 SSL_CTX_free(ctx);
             }
 
-            if (aSocket >= 0)
-                close(aSocket);
+            if (netSocketValid(aSocket))
+                netSocketClose(aSocket);
         }
     }
 
@@ -126,9 +128,9 @@ static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bC
             SSL_free(aConnectInfo->ssl);
             SSL_CTX_free(aConnectInfo->ssl_ctx);
         }
-        if (aConnectInfo->fd >= 0)
+        if (netSocketValid(aConnectInfo->fd))
         {
-            close(aConnectInfo->fd);
+            netSocketClose(aConnectInfo->fd);
         }
 
         delete aConnectInfo;
@@ -162,9 +164,9 @@ static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bC
             SSL_free(aConnectInfo->ssl);
             SSL_CTX_free(aConnectInfo->ssl_ctx);
         }
-        if (aConnectInfo->fd >= 0)
+        if (netSocketValid(aConnectInfo->fd))
         {
-            close(aConnectInfo->fd);
+            netSocketClose(aConnectInfo->fd);
         }
 
         delete aConnectInfo;
@@ -181,9 +183,9 @@ static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bC
             SSL_free(aConnectInfo->ssl);
             SSL_CTX_free(aConnectInfo->ssl_ctx);
         }
-        if (aConnectInfo->fd >= 0)
+        if (netSocketValid(aConnectInfo->fd))
         {
-            close(aConnectInfo->fd);
+            netSocketClose(aConnectInfo->fd);
         }
 
         if (bConnectInfo->ssl)
@@ -193,10 +195,10 @@ static void tlsCreateProxyMission(TlsClientInfo *aConnectInfo, TlsClientInfo *bC
             SSL_CTX_free(bConnectInfo->ssl_ctx);
             bConnectInfo->ssl = NULL; // 避免重复释放
         }
-        if (bConnectInfo->fd >= 0)
+        if (netSocketValid(bConnectInfo->fd))
         {
-            close(bConnectInfo->fd);
-            bConnectInfo->fd = -1; // 标记为已关闭
+            netSocketClose(bConnectInfo->fd);
+            bConnectInfo->fd = SOCKET_INVALID; // 标记为已关闭
         }
 
         delete aConnectInfo;
@@ -222,7 +224,7 @@ void tlsSocketUpgradeCallback(SocketClientInfo *clientInfo, TlsClientCallback tl
     }
 }
 
-void tlsServerCallback(int fd, TlsClientInfo *tlsClientInfo)
+void tlsServerCallback(TlsClientInfo *tlsClientInfo)
 {
 
     // 必须复制TlsClientInfo
@@ -252,25 +254,25 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
     SSL *bSsl = bConnectInfo->ssl;
     SSL_CTX *aSslCtx = aConnectInfo->ssl_ctx;
     SSL_CTX *bSslCtx = bConnectInfo->ssl_ctx;
-    int aSocket = aConnectInfo->fd;
-    int bSocket = bConnectInfo->fd;
+    SOCKET_T aSocket = aConnectInfo->fd;
+    SOCKET_T bSocket = bConnectInfo->fd;
 
-    // 初始化为-1表示未创建
-    int epollFd = -1;
+    // 初始化为 NULL 表示未创建
+    struct PlatformWaitSet *waitSet = NULL;
 
-    char *bufferAtoB = new (std::align_val_t(64)) char[gClientSocketBufferSize];
-    char *bufferBtoA = new (std::align_val_t(64)) char[gServerSocketBufferSize];
+    char *bufferAtoB = (char *)netAlignedAlloc((size_t)gClientSocketBufferSize, 64);
+    char *bufferBtoA = (char *)netAlignedAlloc((size_t)gServerSocketBufferSize, 64);
 
     // 用于标记是否需要执行清理逻辑的 lambda
     auto cleanup = [&]()
     {
-        if (epollFd != -1)
+        if (waitSet != NULL)
         {
-            close(epollFd);
+            netWaitSetDestroy(waitSet);
         }
 
-        operator delete[](bufferAtoB, std::align_val_t(64));
-        operator delete[](bufferBtoA, std::align_val_t(64));
+        netAlignedFree(bufferAtoB);
+        netAlignedFree(bufferBtoA);
 
         if (bSsl)
         {
@@ -278,9 +280,9 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
             SSL_free(bSsl);
             SSL_CTX_free(bSslCtx);
         }
-        if (bSocket >= 0)
+        if (netSocketValid(bSocket))
         {
-            close(bSocket);
+            netSocketClose(bSocket);
         }
         delete bConnectInfo;
 
@@ -290,9 +292,9 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
             SSL_free(aSsl);
             SSL_CTX_free(aSslCtx);
         }
-        if (aSocket >= 0)
+        if (netSocketValid(aSocket))
         {
-            close(aSocket);
+            netSocketClose(aSocket);
         }
         delete aConnectInfo;
 
@@ -300,6 +302,16 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
     };
 
     logOutputInfoConsole("TLS proxy worker started");
+
+    if (bufferAtoB == nullptr || bufferBtoA == nullptr)
+    {
+        // netAlignedAlloc 失败返回 NULL，而 SSL_read 会直接往这个指针写，
+        // 非空长度配空指针就是访问违例。cleanup() 里 free(NULL) 是安全的。
+        logOutputErrorConsole("CRITICAL: Failed to allocate TLS transfer buffers (client=" + std::to_string(gClientSocketBufferSize) +
+                              " bytes, server=" + std::to_string(gServerSocketBufferSize) + " bytes) before proxy worker!");
+        cleanup();
+        return;
+    }
 
     if (SSL_is_init_finished(aSsl) == 0 || SSL_is_init_finished(bSsl) == 0)
     {
@@ -311,42 +323,38 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
 
     if (gConfigTlsReadOrWriteTimeoutMs > 0)
     {
-        struct timeval tv;
-        tv.tv_sec = gConfigTlsReadOrWriteTimeoutMs / 1000;
-        tv.tv_usec = (gConfigTlsReadOrWriteTimeoutMs % 1000) * 1000;
-        setsockopt(aSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(aSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        setsockopt(bSocket, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(bSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        netSetRecvTimeoutMs(aSocket, gConfigTlsReadOrWriteTimeoutMs);
+        netSetSendTimeoutMs(aSocket, gConfigTlsReadOrWriteTimeoutMs);
+        netSetRecvTimeoutMs(bSocket, gConfigTlsReadOrWriteTimeoutMs);
+        netSetSendTimeoutMs(bSocket, gConfigTlsReadOrWriteTimeoutMs);
     }
 
-    epollFd = epoll_create1(EPOLL_CLOEXEC);
-    if (epollFd == -1)
+    waitSet = netWaitSetCreate();
+    if (waitSet == NULL)
     {
-        logOutputErrorConsole("tls Proxy: Failed to create epoll instance: " + std::string(strerror(errno)));
+        logOutputErrorConsole("tls Proxy: Failed to create wait set: " + std::string(netErrorString(netLastError())));
         cleanup();
         return;
     }
 
-    logOutputDebugConsole("tls Proxy: create epoll success");
-    struct epoll_event epollEventConnectA{}, epollEventConnectB{}, events[2];
-    epollEventConnectA.events = EPOLLIN;
-    epollEventConnectA.data.fd = aSocket;
-    if (epoll_ctl(epollFd, EPOLL_CTL_ADD, aSocket, &epollEventConnectA) == -1)
+    logOutputDebugConsole("tls Proxy: create wait set success");
+    if (netWaitSetAdd(waitSet, aSocket) == -1)
     {
-        logOutputErrorConsole("tls Proxy: Failed to add aSocket to epoll: " + std::string(strerror(errno)));
+        logOutputErrorConsole("tls Proxy: Failed to add aSocket to wait set: " + std::string(netErrorString(netLastError())));
         cleanup();
         return;
     }
 
-    epollEventConnectB.events = EPOLLIN;
-    epollEventConnectB.data.fd = bSocket;
-    if (epoll_ctl(epollFd, EPOLL_CTL_ADD, bSocket, &epollEventConnectB) == -1)
+    if (netWaitSetAdd(waitSet, bSocket) == -1)
     {
-        logOutputErrorConsole("tls Proxy: Failed to add bSocket to epoll: " + std::string(strerror(errno)));
+        logOutputErrorConsole("tls Proxy: Failed to add bSocket to wait set: " + std::string(netErrorString(netLastError())));
         cleanup();
         return;
     }
+
+    // 每轮等待的 fd 与结果：Linux 走 epoll，Windows 走 WSAPoll，循环体本身不感知平台
+    SOCKET_T waitFds[2] = {aSocket, bSocket};
+    int waitStates[2] = {NET_WAIT_NONE, NET_WAIT_NONE};
 
     // timeout 统一以毫秒累计，与两个 *TimeoutMs 配置项同单位
     const float pollTimeMs = (float)gConfigTlsPollingIntervalMs;
@@ -354,14 +362,10 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
 
     while (rgTlsServerRun)
     {
-        int eventsNumber = epoll_wait(epollFd, events, 2, gConfigTlsPollingIntervalMs);
+        int eventsNumber = netWaitSetWait(waitSet, 2, 0, gConfigTlsPollingIntervalMs, waitFds, waitStates);
         if (eventsNumber == -1)
         {
-            if (errno == EINTR)
-            {
-                continue;
-            }
-            logOutputErrorConsole("tls Proxy: Failed to wait for epoll events: " + std::string(strerror(errno)));
+            logOutputErrorConsole("tls Proxy: Failed to wait for events: " + std::string(netErrorString(netLastError())));
             break;
         }
         if (eventsNumber == 0)
@@ -382,13 +386,23 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
 
         bool isBreak = false;
 
-        // epoll 是水平触发：一次事件只做一次 SSL_read/SSL_write，
-        // 剩余数据会再次触发 EPOLLIN，不需要靠 SSL_pending() 手工排空。
-        for (int i = 0; i < eventsNumber; i++)
+        // 水平触发：一次事件只做一次 SSL_read / SSL_write，
+        // 剩余数据会再次触发通知，不需要靠 SSL_pending() 手工排空。
+        for (int i = 0; i < 2; i++)
         {
-            int activeFd = events[i].data.fd;
-            uint32_t eventFlags = events[i].events;
-            if (eventFlags & EPOLLIN)
+            if (waitStates[i] == NET_WAIT_NONE)
+            {
+                continue;
+            }
+
+            SOCKET_T activeFd = waitFds[i];
+
+            if (waitStates[i] == NET_WAIT_FAILED)
+            {
+                logOutputErrorConsole("tls Proxy: wait set reported failure on fd " + std::to_string((int)activeFd));
+                isBreak = true;
+            }
+            else
             {
                 SSL *srcSsl = activeFd == aSocket ? aSsl : bSsl;
                 SSL *dstSsl = activeFd == aSocket ? bSsl : aSsl;
@@ -415,20 +429,22 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                             if (sendErrno == SSL_ERROR_WANT_WRITE)
                             {
                                 // 必须等目标端可写：a->b 时目标是 bSocket，反之是 aSocket
-                                int dstSocket = isAtoB ? bSocket : aSocket;
+                                SOCKET_T dstSocket = isAtoB ? bSocket : aSocket;
+                                SOCKET_T writeFds[1] = {dstSocket};
+                                int writeStates[1] = {NET_WAIT_NONE};
 
-                                fd_set writefds;
-                                FD_ZERO(&writefds);
-                                FD_SET(dstSocket, &writefds);
-
-                                struct timeval timeoutUse = {
-                                    static_cast<time_t>(gConfigSocketPollingIntervalMs / 1000),
-                                    static_cast<suseconds_t>((gConfigSocketPollingIntervalMs % 1000) * 1000)};
-
-                                int ret = select(dstSocket + 1, NULL, &writefds, NULL, &timeoutUse);
-                                if (ret <= 0)
+                                // 只在真实错误时中断；返回 0 是等待超时，
+                                // 交给下面的累计 timeout 判定，避免一次 select 超时就把连接掐掉
+                                int writeReady = netWaitSetWait(waitSet, 1, 1, gConfigSocketPollingIntervalMs, writeFds, writeStates);
+                                if (writeReady == -1)
                                 {
-                                    logOutputErrorConsole("tls Proxy: bSsl write select failed: " + std::string(strerror(errno)));
+                                    logOutputErrorConsole("tls Proxy: bSsl write wait failed: " + std::string(netErrorString(netLastError())));
+                                    isBreak = true;
+                                    break;
+                                }
+                                if (writeStates[0] == NET_WAIT_FAILED)
+                                {
+                                    logOutputErrorConsole("tls Proxy: bSsl write wait reported failure");
                                     isBreak = true;
                                     break;
                                 }
@@ -460,18 +476,18 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                     }
                     else if (recvErrno == SSL_ERROR_SYSCALL)
                     {
-                        int sys_errno = errno;
+                        int sys_errno = netLastError();
                         if (sys_errno == 0)
                         {
                             logOutputInfoConsole("tls Proxy: aSsl connection closed cleanly");
                         }
-                        else if (sys_errno == ECONNRESET || sys_errno == EPIPE)
+                        else if (netIsReset(sys_errno))
                         {
                             logOutputInfoConsole("tls Proxy: aSsl connection reset by peer");
                         }
                         else
                         {
-                            logOutputErrorConsole("tls Proxy: aSsl read syscall error: " + std::string(strerror(sys_errno)));
+                            logOutputErrorConsole("tls Proxy: aSsl read syscall error: " + std::string(netErrorString(sys_errno)));
                         }
                     }
                     else if (recvErrno == SSL_ERROR_ZERO_RETURN)
@@ -479,13 +495,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                     else
                         logOutputErrorConsole("tls Proxy: aSsl read failed code: " + std::to_string(recvErrno));
                     isBreak = true;
-                    break;
                 }
-            }
-            else
-            {
-                logOutputErrorConsole("tls Proxy: " + std::to_string(eventFlags) + " on fd " + std::to_string(activeFd));
-                isBreak = true;
             }
 
             if (isBreak)
