@@ -168,4 +168,4 @@ make -j$(nproc)
 - 单行小写祈使句，无 prefix / scope：`fix tls error`、`update cmake`、`optimize threadpool and callback`。
 - 直接提交 `main`，没有 PR 流程、没有打标签。
 - 注释与日志文案用中文，标识符用英文。
-- 改动配置键、默认值或转发行为时，`README.md` 目前只有两行、无法承载文档，把变更同步到本文件的配置表。
+- 改动配置键、默认值或转发行为时，把变更同步到 `README.md` 的配置项参考表（本文件只记开发约定，配置表以 README 为准）。
