@@ -1,3 +1,7 @@
+#ifndef __PLATFORM_SOCKET_WINDOWS_H__
+#define __PLATFORM_SOCKET_WINDOWS_H__
+#include "headfile.h"
+
 // Windows 平台的 socket 生命周期、收发超时与 IPv4 地址解析接口。
 // 不写 include guard / #pragma once，不 include "headfile.h"：
 // 可重复展开，只含函数声明，不定义 struct / enum / 变量。
@@ -43,3 +47,5 @@ void netAlignedFree(void *ptr);
 #ifdef __cplusplus
 }
 #endif
+
+#endif //__PLATFORM_SOCKET_WINDOWS_H__

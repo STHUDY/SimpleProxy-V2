@@ -1,3 +1,6 @@
+#ifndef __PLATFORM_WAIT_EPOLL_H__
+#define __PLATFORM_WAIT_EPOLL_H__
+#include "headfile.h"
 // Linux 平台的事件等待接口，实现走 epoll（水平触发）。
 // 不写 include guard / #pragma once，不 include "headfile.h"：
 // 可重复展开，只含前置声明与函数声明，不定义 struct / enum / 变量。
@@ -13,16 +16,18 @@ extern "C"
 {
 #endif
 
-struct PlatformWaitSet *netWaitSetCreate(void);
-int netWaitSetAdd(struct PlatformWaitSet *set, SOCKET_T fd);
-void netWaitSetDestroy(struct PlatformWaitSet *set);
+    struct PlatformWaitSet *netWaitSetCreate(void);
+    int netWaitSetAdd(struct PlatformWaitSet *set, SOCKET_T fd);
+    void netWaitSetDestroy(struct PlatformWaitSet *set);
 
-// 等 fds[0..count) 中任一可读（wantWrite=0）或可写（wantWrite=1），最多 timeoutMs 毫秒。
-// 返回就绪个数，0 表示超时，-1 表示出错。
-// states[i] 取 NET_WAIT_NONE / NET_WAIT_READY / NET_WAIT_FAILED。
-// fds 与 states 由调用方提供，长度都是 count。
-int netWaitSetWait(struct PlatformWaitSet *set, int count, int wantWrite, int timeoutMs, SOCKET_T *fds, int *states);
+    // 等 fds[0..count) 中任一可读（wantWrite=0）或可写（wantWrite=1），最多 timeoutMs 毫秒。
+    // 返回就绪个数，0 表示超时，-1 表示出错。
+    // states[i] 取 NET_WAIT_NONE / NET_WAIT_READY / NET_WAIT_FAILED。
+    // fds 与 states 由调用方提供，长度都是 count。
+    int netWaitSetWait(struct PlatformWaitSet *set, int count, int wantWrite, int timeoutMs, SOCKET_T *fds, int *states);
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

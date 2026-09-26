@@ -1,3 +1,7 @@
+#ifndef __PLATFORM_ERROR_WINDOWS_H__
+#define __PLATFORM_ERROR_WINDOWS_H__
+#include "headfile.h"
+
 // Windows 平台的 socket 错误码接口。
 // 不写 include guard / #pragma once，不 include "headfile.h"。
 // Windows 的 socket 错误不走 errno，而是 WSAGetLastError()，
@@ -29,3 +33,5 @@ bool netIsFdExhausted(int errCode);
 #ifdef __cplusplus
 }
 #endif
+
+#endif // __PLATFORM_ERROR_WINDOWS_H__

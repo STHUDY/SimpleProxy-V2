@@ -1,3 +1,7 @@
+#ifndef __PLATFORM_WAIT_WSAPOL_H__
+#define __PLATFORM_WAIT_WSAPOL_H__
+#include "headfile.h"
+
 // Windows 平台的事件等待接口，实现走 WSAPoll。
 // 不写 include guard / #pragma once，不 include "headfile.h"：
 // 可重复展开，只含前置声明与函数声明，不定义 struct / enum / 变量。
@@ -28,3 +32,5 @@ int netWaitSetWait(struct PlatformWaitSet *set, int count, int wantWrite, int ti
 #ifdef __cplusplus
 }
 #endif
+
+#endif //__PLATFORM_WAIT_WSAPOL_H__

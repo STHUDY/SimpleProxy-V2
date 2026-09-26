@@ -8,11 +8,13 @@ config:
   log:
     # 默认就是 debug，写出来是为了让测试失败时能直接看日志定位
     level: debug
-
+  threadpool:
+    minWokers: 10
+    maxWokers: 1000
 server:
   host: 127.0.0.1
-  port: 19800
+  port: 9800
 
 client:
   host: 127.0.0.1
-  port: 19801
+  port: 10808
