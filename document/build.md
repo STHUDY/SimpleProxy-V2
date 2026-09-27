@@ -176,7 +176,7 @@ endif()
 
 ## 编译数据库
 
-`set(CMAKE_EXPORT_COMPILE_COMMANDS ON)` 生成 `build/compile_commands.json`，供 clangd / clang-tidy 使用（`.clangd` 的 `CompilationDatabase: build/` 指向它）。`build/` 在 `.gitignore` 里，需要重新 configure 才会生成。
+`set(CMAKE_EXPORT_COMPILE_COMMANDS ON)` 生成 `build/compile_commands.json`，供 clangd / clang-tidy 使用（`.clangd` 检测到它存在时把它接给参与编译的 .c/.cpp；头文件与无编译数据库时统一走仓库根的 `compile_flags.txt`）。`build/` 在 `.gitignore` 里，需要重新 configure 才会生成。
 
 ---
 

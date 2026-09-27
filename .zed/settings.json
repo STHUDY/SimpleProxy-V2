@@ -7,26 +7,6 @@
       "language_servers": ["clangd"]
     }
   },
-  "lsp": {
-    "clangd": {
-      "initialization_options": {
-        "clangd": {
-          "compilationDatabasePath": "build",
-          "extraArgs": [
-            "-Isrc",
-            "-Isrc/Callback",
-            "-Isrc/Global",
-            "-Isrc/Log",
-            "-Isrc/Platform",
-            "-Isrc/Platform/Linux",
-            "-Isrc/Platform/Windows",
-            "-Isrc/ProtocolServer",
-            "-Isrc/Threadpool"
-          ]
-        }
-      }
-    }
-  },
   "file_types": {
     "C": ["c", "h"],
     "C++": ["cpp", "hpp"]

@@ -60,7 +60,7 @@ src/
   - **新增头文件必须满足以下之一**：① 自带 guard 或 `#pragma once`（`nSocket.h` / `nTls.h` / `config.h` / `Log.h` 走这条）；② **不 `#include "headfile.h"`**，且内容只含可重复展开的宏 / `typedef` / 函数声明（`define.h` 与 `src/Platform/` 下的头走这条）。**两者都不满足就是无限递归。**
   - 走第 ② 条时还有两条硬约束：**不定义 `struct` / `enum` / 变量**（重复展开是硬错误，`PlatformWaitSet` 只能用不完整前置声明）；**类型别名用宏不用 `typedef`**（相同宏体重复定义无条件合法，`typedef` 重复要靠 C11）。
 - `TlsCallback.cpp` 用了 `std::ostringstream`，`<sstream>` 已补进 `headfile.h`；用到新标准库设施时同样把头文件补进去，不要依赖传递包含。
-- **`.clangd` 的 `Add` 列表必须和 `CMakeLists.txt` 展开出的 include 路径一致**（当前 = `src` + 5 个子目录 + `Platform/` + `Platform/Linux` + `Platform/Windows`，共 9 条）。增删 `src/` 子目录时同步它；clangd 的 `Add` 不支持 glob，只能逐条列。`CompilationDatabase: build/` 依赖 `CMakeLists.txt` 里的 `CMAKE_EXPORT_COMPILE_COMMANDS`。
+- **clangd 的 include 路径写在仓库根的 `compile_flags.txt`，必须和 `CMakeLists.txt` 展开出的 include 路径一致**（当前 = `src` + 5 个子目录 + `Platform/` + `Platform/Linux` + `Platform/Windows` + vcpkg，共 10 条）。增删 `src/` 子目录时同步它，只能逐条列。**不要写进 `.clangd` 的 `CompileFlags.Add`**：相对 `-I` 的解析基准是 clangd 进程的工作目录（VSCode 恰好 = 项目根所以正常，Zed 不是，会全部解析失败）；`compile_flags.txt` 的相对路径固定按文件自身所在目录解析，与工作目录无关。`.clangd` 只保留两件事：`build/compile_commands.json` 存在时把编译数据库接给 .c/.cpp（`If: PathExists + PathMatch`），以及 `-std=gnu++17` 兜底（无编译数据库时 clangd 的 C++ 兜底方言是 c++14）。
 - **全局配置是 C / C++ 双份**：
   - `src/Global/config.h` + `config.c` —— C 侧（`g*` 配置、`rg*` 运行时、`char*` 别名）
   - `src/Global/config.hpp` + `config.cpp` —— C++ 侧（`std::string` / `std::vector` / `rgThreadPool`）
