@@ -99,11 +99,13 @@ Debug 用 `-O0 -g`，Release 用 `-O3 -DNDEBUG -funroll-loops -ftree-vectorize -
 ```powershell
 git clone https://github.com/microsoft/vcpkg C:\vcpkg
 C:\vcpkg\scripts\bootstrap-vcpkg.bat -disableMetrics
+cd <仓库根目录>
+C:\vcpkg\scripts\vcpkg install --triplet x64-windows-static --recurse
 ```
 
 依赖装好后产物在 `vcpkg_installed\<triplet>\`，**必须告诉 CMake 去哪找**：
 
-如果遇到网络问题，可以尝试设置GIT镜像
+如果遇到网络问题，可以尝试设置GIT镜像或开启代理
 
 ```
 git config --global url."https://gh-proxy.org/https://github.com".insteadOf https://github.com
@@ -112,7 +114,7 @@ git config --global url."https://gh-proxy.org/https://github.com".insteadOf http
 ```powershell
 cd <仓库根目录>
 
-cmake -S . -B build -G "Visual Studio 18 2026" -A x64 `
+cmake -S . -B build -A x64 `
   "-DCMAKE_PREFIX_PATH=$PWD\vcpkg_installed\x64-windows-static"
 
 cmake --build build                  # Debug（默认）
