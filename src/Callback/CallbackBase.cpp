@@ -32,7 +32,7 @@ bool selectBackendTarget(BackendTarget &target)
         return false;
     }
 
-    size_t selectedIndex = 0;
+    int selectedIndex = 0;
     size_t listSize = gClientHostList.size();
 
     if (listSize == 0)
