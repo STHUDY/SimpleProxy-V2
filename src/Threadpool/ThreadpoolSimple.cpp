@@ -11,10 +11,10 @@ void ThreadpoolSimple::createManagerThread()
                 size_t mission_count = 0;
                 while (!this->threadpool_is_close)
                 {
-                    if (this->pool_size > this->working_thread_number)
+                    long work_change_number = static_cast<long>(this->pool_size) - static_cast<long>(this->worker_thread_number);
+                    if (work_change_number > 0)
                     {
-                        size_t create_work_number = this->pool_size - this->working_thread_number;
-                        for (size_t i = 0; i < create_work_number; i++)
+                        for (size_t i = 0; i < work_change_number; i++)
                         {
                             if (!this->threadpool_is_close)
                             {
@@ -22,7 +22,7 @@ void ThreadpoolSimple::createManagerThread()
                                 {
                                     this->createWorkThread();
                                 }
-                                catch (const std::exception &e)
+                                catch (const std::exception& e)
                                 {
                                     this->pool_size -= 1;
                                     this->errorOutputInfo(0x0001, e.what());
@@ -30,6 +30,15 @@ void ThreadpoolSimple::createManagerThread()
 
                                 this->assignMissions();
                             }
+                        }
+                    }
+                    else if (work_change_number < 0)
+                    {
+                        for (long i = 0; i < -work_change_number; ++i)
+                        {
+                            if (this->threadpool_is_close)
+                                break;
+                            this->workerNotifyOnce();
                         }
                     }
 
@@ -40,8 +49,7 @@ void ThreadpoolSimple::createManagerThread()
                     if (mission_count == 0 && !this->threadpool_is_close)
                     {
                         std::unique_lock<std::mutex> lockManager(this->manager_mutex);
-                        this->cv_manager.wait(lockManager, [this]
-                                              { return !this->mission_list.empty() || this->pool_size != this->working_thread_number || this->threadpool_is_close; });
+                        this->cv_manager.wait(lockManager);
                     }
 
                     this->assignMissions();
@@ -60,7 +68,7 @@ void ThreadpoolSimple::createManagerThread()
                 }
             });
     }
-    catch (const std::exception &e)
+    catch (const std::exception& e)
     {
         this->errorOutputInfo(0xFF01, e.what());
     }
@@ -70,21 +78,21 @@ void ThreadpoolSimple::createWorkThread()
 {
     {
         std::unique_lock<std::mutex> lock(this->work_count_mutex);
-        this->working_thread_number += 1;
+        this->worker_thread_number += 1;
     }
 
-    WorkAttribute *workAttribute = nullptr;
+    WorkAttribute* workAttribute = nullptr;
 
     try
     {
         workAttribute = new WorkAttribute();
         workAttribute->isClosed = false;
     }
-    catch (const std::exception &e)
+    catch (const std::exception& e)
     {
         {
             std::unique_lock<std::mutex> lock(this->work_count_mutex);
-            this->working_thread_number -= 1;
+            this->worker_thread_number -= 1;
         }
 
         throw e;
@@ -92,7 +100,7 @@ void ThreadpoolSimple::createWorkThread()
 
     try
     {
-        std::thread *workThread = new std::thread(
+        std::thread* workThread = new std::thread(
             [this, workAttribute]()
             {
                 while (!this->threadpool_is_close)
@@ -108,7 +116,7 @@ void ThreadpoolSimple::createWorkThread()
 
                         {
                             std::unique_lock<std::mutex> lockCount(this->work_count_mutex);
-                            if (pool_size < working_thread_number)
+                            if (pool_size < worker_thread_number)
                             {
                                 this->free_thread_number -= 1;
                                 break;
@@ -118,7 +126,7 @@ void ThreadpoolSimple::createWorkThread()
                         }
                     }
 
-                    MissionBase *mission = nullptr;
+                    MissionBase* mission = nullptr;
                     {
                         std::unique_lock<std::mutex> lockList(this->mission_list_mutex);
                         if (!this->mission_list.empty())
@@ -134,11 +142,12 @@ void ThreadpoolSimple::createWorkThread()
                         {
                             mission->execute();
                         }
-                        catch (const std::exception &e)
+                        catch (const std::exception& e)
                         {
                             this->errorOutputInfo(0x0002, std::string(e.what()));
                         }
                         delete mission;
+                        this->managerNotifyOnce();
                     }
 
                     {
@@ -154,7 +163,7 @@ void ThreadpoolSimple::createWorkThread()
 
                 {
                     std::unique_lock<std::mutex> lockCount(this->work_count_mutex);
-                    this->working_thread_number -= 1;
+                    this->worker_thread_number -= 1;
                     this->wait_destroy_number += 1;
                     workAttribute->isClosed = true;
                 }
@@ -163,12 +172,12 @@ void ThreadpoolSimple::createWorkThread()
         workAttribute->thread = workThread;
         this->work_thread_list.push_back(workAttribute);
     }
-    catch (const std::exception &e)
+    catch (const std::exception& e)
     {
         delete workAttribute;
         {
             std::unique_lock<std::mutex> lock(this->work_count_mutex);
-            this->working_thread_number -= 1;
+            this->worker_thread_number -= 1;
         }
 
         throw e;
@@ -178,6 +187,11 @@ void ThreadpoolSimple::createWorkThread()
 void ThreadpoolSimple::managerNotifyOnce()
 {
     this->cv_manager.notify_one();
+}
+
+void ThreadpoolSimple::workerNotifyOnce()
+{
+    this->cv_work.notify_one();
 }
 
 void ThreadpoolSimple::clearDestroyThread()
@@ -220,7 +234,7 @@ void ThreadpoolSimple::assignMissions()
 
     for (size_t i = 0; i < mission_count; i++)
     {
-        cv_work.notify_one();
+        this->workerNotifyOnce();
     }
 }
 
@@ -281,14 +295,14 @@ bool ThreadpoolSimple::popMission()
     {
         return true;
     }
-    MissionBase *mission = this->mission_list.back();
+    MissionBase* mission = this->mission_list.back();
     this->mission_list.pop_back();
     delete mission;
     size_t mission_count = this->mission_list.size();
     return mission_count == 0 ? true : false;
 }
 
-ThreadpoolSimple::MissionBase *ThreadpoolSimple::getAndPopMission()
+ThreadpoolSimple::MissionBase* ThreadpoolSimple::getAndPopMission()
 {
     std::unique_lock<std::mutex> lock(this->mission_list_mutex);
 
@@ -297,7 +311,7 @@ ThreadpoolSimple::MissionBase *ThreadpoolSimple::getAndPopMission()
         return nullptr;
     }
 
-    MissionBase *mission = this->mission_list.back();
+    MissionBase* mission = this->mission_list.back();
     this->mission_list.pop_back();
     return mission;
 }
@@ -305,7 +319,7 @@ ThreadpoolSimple::MissionBase *ThreadpoolSimple::getAndPopMission()
 void ThreadpoolSimple::clearMissions()
 {
     std::unique_lock<std::mutex> lock(mission_list_mutex);
-    for (auto *mission : mission_list)
+    for (auto* mission : mission_list)
     {
         delete mission;
     }

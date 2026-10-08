@@ -1,4 +1,6 @@
 {
+  "name": "simple-proxy-v2",
+  "version": "1.0.0",
   "dependencies": [
     "openssl",
     "yaml-cpp"

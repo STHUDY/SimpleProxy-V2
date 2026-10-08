@@ -417,7 +417,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
                     size_t sentTotal = 0;
                     while (rgTlsServerRun && sentTotal < sslReadNum)
                     {
-                        int sentNum = SSL_write(dstSsl, buffer + sentTotal, sslReadNum - sentTotal);
+                        int sentNum = SSL_write(dstSsl, buffer + sentTotal, sslReadNum - static_cast<int>(sentTotal));
                         if (sentNum > 0)
                         {
                             logOutputDebugConsole((isAtoB ? "tls proxy -> server: " : "tls proxy -> client: ") + std::to_string(sentNum) + " bytes to bSocket");

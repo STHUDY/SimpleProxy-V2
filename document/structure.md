@@ -9,7 +9,8 @@ SimpleProxy-V2/
 ├── README.md                   面向使用者
 ├── AGENTS.md                   面向开发者的约定与红线
 ├── MISTAKE.md                  已核实但未修复的缺陷
-├── .clangd                     clangd 配置（include 路径必须与 CMake 展开结果一致）
+├── .clangd                     clangd 配置（条件接编译数据库 + C++17 兜底）
+├── compile_flags.txt          clangd 兜底 include 路径（必须与 CMake 展开结果一致）
 ├── .gitignore
 ├── vcpkg.json                  依赖清单（openssl / yaml-cpp）
 ├── document/                   本目录：技术文档
@@ -120,13 +121,13 @@ main.cpp
    ```
    这会自动包含新增的 `src/Platform/`、`src/Platform/Linux/`、`src/Platform/Windows/`。
 
-5. **`.clangd` 的 `Add` 列表必须与上面展开出的集合完全一致**，且只能逐条列（clangd 的 `Add` 不支持 glob）。当前 9 条：
+5. **仓库根的 `compile_flags.txt` 的 `-I` 列表必须与上面展开出的集合完全一致**，且只能逐条列。当前：
    ```
    -Isrc  -Isrc/Callback  -Isrc/Global  -Isrc/Log
    -Isrc/Platform  -Isrc/Platform/Linux  -Isrc/Platform/Windows
    -Isrc/ProtocolServer  -Isrc/Threadpool
    ```
-   增删 `src/` 子目录时两边都要改。
+   增删 `src/` 子目录时两边都要改。include 路径不放 `.clangd` 的 `CompileFlags.Add`：相对 `-I` 按 clangd 进程的工作目录解析，VSCode 恰好用项目根启动所以正常、Zed 不是所以全部失败（见 [MISTAKE.md](../MISTAKE.md)）。`.clangd` 只保留：`build/compile_commands.json` 存在时把编译数据库接给 .c/.cpp，以及 `-std=gnu++17` 兜底。
 
 6. **`src/Platform/` 下的头是例外** —— 它们不 include 任何东西（包括 `headfile.h`），由 `headfile.h` 单向引入。原因见 [platform.md](platform.md)。
 

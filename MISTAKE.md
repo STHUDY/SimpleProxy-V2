@@ -79,15 +79,17 @@ worker 消费用 `front()` + `pop_front()`（`:126-127`，FIFO），而丢弃路
 
 ---
 
-## 4. `src/` 子目录增删后必须同步 `.clangd`
+## 4. `src/` 子目录增删后必须同步 `compile_flags.txt`
 
-`.clangd` 的 `Add` 列表和 `CMakeLists.txt` 里 `file(GLOB_RECURSE SUBDIRS src/*)` + `get_filename_component(... DIRECTORY)` 展开出来的 include 路径是**同一件事的两份声明**：CMake 自动跟着 `src/` 走，`.clangd` 不会。
+`compile_flags.txt` 的 `-I` 列表和 `CMakeLists.txt` 里 `file(GLOB_RECURSE SUBDIRS src/*)` + `get_filename_component(... DIRECTORY)` 展开出来的 include 路径是**同一件事的两份声明**：CMake 自动跟着 `src/` 走，`compile_flags.txt` 不会。
 
-CMake 当前实际添加的是 `src` 加全部 5 个子目录（`Callback` / `Global` / `Log` / `ProtocolServer` / `Threadpool`）。`.clangd` 里的 `Add` 必须与这个集合完全一致，且**只能用目录名，不能用通配符**（clangd 的 `Add` 不支持 glob）。
+CMake 当前实际添加的是 `src` 加全部 5 个子目录（`Callback` / `Global` / `Log` / `ProtocolServer` / `Threadpool`）。`compile_flags.txt` 里的 `-I` 必须与这个集合完全一致，且**只能用目录名，不能用通配符**。
 
-新增 `src/` 子目录时要同时做两件事：把头文件按裸文件名 include（依赖 CMake 自动加的 include 路径），并往 `.clangd` 里补一条对应的 `-I`。
+新增 `src/` 子目录时要同时做两件事：把头文件按裸文件名 include（依赖 CMake 自动加的 include 路径），并往 `compile_flags.txt` 里补一条对应的 `-I`。
 
 **成因**：目录增删只改了 CMake 一侧，工具配置靠人记。**include 路径在仓库里有两份声明，改一处必须改另一处。**
+
+附：这份列表曾经放在 `.clangd` 的 `CompileFlags.Add` 里，相对 `-I` 按 clangd 进程的工作目录解析——VSCode 恰好用项目根启动 clangd 所以正常，Zed 不是，导致 Zed 里全部项目头解析失败（日志 `IncludeCleaner: resolved path ''`）。已改为 `compile_flags.txt`（相对路径按文件自身所在目录解析，与工作目录无关）。
 
 ---
 

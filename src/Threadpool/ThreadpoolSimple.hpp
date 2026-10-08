@@ -59,7 +59,7 @@ private:
     bool is_output_error = false;
 
     size_t pool_size = 0;
-    size_t working_thread_number = 0;
+    size_t worker_thread_number = 0;
     size_t free_thread_number = 0;
     size_t busy_thread_number = 0;
     size_t wait_destroy_number = 0;
@@ -104,6 +104,7 @@ public:
     MissionBase *getAndPopMission();
     void clearMissions();
     void managerNotifyOnce();
+    void workerNotifyOnce();
 
     void sthutdown();
 

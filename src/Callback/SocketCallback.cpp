@@ -127,7 +127,7 @@ void socketProxyWorkerSingle(SocketClientInfo *aConnectInfo, SocketClientInfo *b
             }
 
             logOutputDebugConsole(headText + "Waiting for data from " + std::string(aConnectInfo->ip_str) + ":" + std::to_string(aConnectInfo->port));
-            NET_SSIZE_T recvLen = recv(aSocket, buffer, bufferSize, SOCKET_SEND_FLAGS);
+            NET_SSIZE_T recvLen = recv(aSocket, buffer, static_cast<int>(bufferSize), SOCKET_SEND_FLAGS);
             if (recvLen < 0)
             {
                 int recvErr = netLastError();

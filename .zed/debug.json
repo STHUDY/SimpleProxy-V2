@@ -1,44 +1,164 @@
 [
   {
-    "label": "cmake configure",
+    "label": "cmake configure (Debug) - Linux",
     "build": {
       "command": "cmake",
-      "args": ["-S", ".", "-B", "build"],
+      "args": ["-S", ".", "-B", "build", "-DCMAKE_BUILD_TYPE=Debug"],
       "cwd": "$ZED_WORKTREE_ROOT",
     },
     "request": "launch",
     "adapter": "CodeLLDB",
   },
   {
-    "label": "cmake rebuild configure",
-    "build": {
-      "command": "sh",
-      "args": ["-c", "rm -rf build && cmake -S . -B build"],
-      "cwd": "$ZED_WORKTREE_ROOT",
-    },
-    "request": "launch",
-    "adapter": "CodeLLDB",
-  },
-  {
-    "label": "cmake build native binary (Debug)",
-    "build": {
-      "command": "cmake",
-      "args": ["--build", "build", "-j"],
-      "cwd": "$ZED_WORKTREE_ROOT",
-    },
-  },
-  {
-    "label": "cmake run native binary (Debug) test SockToSock",
+    "label": "cmake rebuild configure (Debug) - Linux",
     "build": {
       "command": "sh",
       "args": [
         "-c",
-        "rm -rf build && cmake -S . -B build && cmake --build build -j",
+        "rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake run native binary (Debug) test SockToSock - Linux",
+    "build": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build -j",
       ],
       "cwd": "$ZED_WORKTREE_ROOT",
     },
     "program": "$ZED_WORKTREE_ROOT/build/SimpleProxy",
     "args": ["-c", "$ZED_WORKTREE_ROOT/test/SockToSock/config.sock.yml"],
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake run native binary (Release) test SockToSock - Linux",
+    "build": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "rm -rf build-release && cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release && cmake --build build-release -j",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "program": "$ZED_WORKTREE_ROOT/build-release/SimpleProxy",
+    "args": ["-c", "$ZED_WORKTREE_ROOT/test/SockToSock/config.sock.yml"],
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "vcpkg install dependencies (static CRT) - Windows",
+    "build": {
+      "command": "vcpkg",
+      "args": ["install", "--triplet", "x64-windows-static", "--recurse"],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake configure (Debug) - Windows",
+    "build": {
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=\"$PWD\\vcpkg_installed\\x64-windows-static\"",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake rebuild configure (Debug) - Windows",
+    "build": {
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue; ",
+        "cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=\"$PWD\\vcpkg_installed\\x64-windows-static\"",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake run native binary (Debug) test SockToSock - Windows",
+    "build": {
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue; cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=\"$PWD\\vcpkg_installed\\x64-windows-static\"; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cmake --build build --config Debug -j; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "program": "$ZED_WORKTREE_ROOT/build/Debug/SimpleProxy.exe",
+    "args": ["-c", "$ZED_WORKTREE_ROOT/test/SockToSock/config.sock.yml"],
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake configure (Release) - Windows",
+    "build": {
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=\"$PWD\\vcpkg_installed\\x64-windows-static\"",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake rebuild configure (Release) - Windows",
+    "build": {
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue; ",
+        "cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=\"$PWD\\vcpkg_installed\\x64-windows-static\"",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake run native binary (Release) test SockToSock - Windows",
+    "build": {
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue; cmake -S . -B build -A x64 -DCMAKE_PREFIX_PATH=\"$PWD\\vcpkg_installed\\x64-windows-static\"; if ($LASTEXITCODE) { exit $LASTEXITCODE }; cmake --build build --config Release -j; if ($LASTEXITCODE) { exit $LASTEXITCODE }",
+      ],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
+    "program": "$ZED_WORKTREE_ROOT/build/Release/SimpleProxy.exe",
+    "args": ["-c", "$ZED_WORKTREE_ROOT/test/SockToSock/config.sock.yml"],
+    "request": "launch",
+    "adapter": "CodeLLDB",
+  },
+  {
+    "label": "cmake build binary",
+    "build": {
+      "command": "cmake",
+      "args": ["--build", "build", "-j"],
+      "cwd": "$ZED_WORKTREE_ROOT",
+    },
     "request": "launch",
     "adapter": "CodeLLDB",
   },
