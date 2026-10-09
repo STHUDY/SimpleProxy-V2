@@ -435,7 +435,7 @@ void tlsProxyWorker(TlsClientInfo *aConnectInfo, TlsClientInfo *bConnectInfo)
 
                                 // 只在真实错误时中断；返回 0 是等待超时，
                                 // 交给下面的累计 timeout 判定，避免一次 select 超时就把连接掐掉
-                                int writeReady = netWaitSetWait(waitSet, 1, 1, gConfigSocketPollingIntervalMs, writeFds, writeStates);
+                                int writeReady = netWaitSetWait(waitSet, 1, 1, gConfigTlsPollingIntervalMs, writeFds, writeStates);
                                 if (writeReady == -1)
                                 {
                                     logOutputErrorConsole("tls Proxy: bSsl write wait failed: " + std::string(netErrorString(netLastError())));
