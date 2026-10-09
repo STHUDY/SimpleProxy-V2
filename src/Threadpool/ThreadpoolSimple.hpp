@@ -56,13 +56,13 @@ private:
     bool threadpool_is_close = false;
     bool is_can_submit_mission = true;
     bool is_finish_destroy = true;
+    bool is_can_destroy = true;
     bool is_output_error = false;
 
     size_t pool_size = 0;
     size_t worker_thread_number = 0;
     size_t free_thread_number = 0;
     size_t busy_thread_number = 0;
-    size_t wait_destroy_number = 0;
 
     std::mutex mission_list_mutex;
     std::mutex work_count_mutex;

@@ -54,17 +54,15 @@ void ThreadpoolSimple::createManagerThread()
 
                     this->assignMissions();
 
-                    if (this->is_finish_destroy)
-                        if (this->wait_destroy_number != 0)
-                        {
-                            {
-                                std::unique_lock<std::mutex> lockCount(this->work_count_mutex);
-                                this->is_finish_destroy = false;
-                                this->createMission(
-                                    [this]()
-                                    { this->clearDestroyThread(); });
-                            }
-                        }
+                    if (this->is_finish_destroy && this->is_can_destroy)
+                    {
+                        std::unique_lock<std::mutex> lockCount(this->work_count_mutex);
+                        this->is_finish_destroy = false;
+                        this->is_can_destroy = false;
+                        this->createMission(
+                            [this]()
+                            { this->clearDestroyThread(); });
+                    }
                 }
             });
     }
@@ -164,7 +162,6 @@ void ThreadpoolSimple::createWorkThread()
                 {
                     std::unique_lock<std::mutex> lockCount(this->work_count_mutex);
                     this->worker_thread_number -= 1;
-                    this->wait_destroy_number += 1;
                     workAttribute->isClosed = true;
                     this->is_finish_destroy = true;
                 }
@@ -207,13 +204,17 @@ void ThreadpoolSimple::clearDestroyThread()
                 (*it)->thread->join();
                 delete *it;
                 it = this->work_thread_list.erase(it);
-                this->wait_destroy_number--;
             }
         }
         else
         {
             ++it;
         }
+    }
+
+    {
+        std::unique_lock<std::mutex> lockCount(this->work_count_mutex);
+        this->is_can_destroy = true;
     }
 }
 
